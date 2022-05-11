@@ -1,0 +1,200 @@
+//------------------------------------------------
+//--- 010 Editor v12.0.1 Binary Template
+//
+//      File: 
+//   Authors: 
+//   Version: 
+//   Purpose: 
+//  Category: 
+// File Mask: 
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+
+typedef char ID[4];
+
+typedef struct {
+    uint32 length;
+    char str[length] <bgcolor=cLtRed>;
+} UEString <optimize=false>;
+
+typedef struct {
+    byte flag;
+    if (flag) {
+        GUID guid;
+    }
+} OptionalGUID <optimize=false>;
+
+typedef struct {
+    float x;
+    float y;
+    float z;
+} Vec3;
+
+typedef struct {
+    GUID id;
+    int32 value;
+} CustomFormatData <bgcolor=cLtBlue>;
+
+typedef struct {
+    ID magic;
+    int32 saveGameVersion;
+    int32 packageVersion;
+    int16 engineVersionMajor;
+    int16 engineVersionMinor;
+    int16 engineVersionPatch;
+    int32 engineVersionBuild;
+    UEString engineVersionMinor;
+
+    int customFormatVersion;
+    unsigned int customFormatDataCount;
+    CustomFormatData customFormatData[customFormatDataCount];
+} Header;
+
+
+struct UEProperty;
+struct UEPropertyTyped;
+
+typedef struct {
+    byte null;
+    int value;
+} IntProperty;
+
+typedef struct {
+    byte null;
+    float value;
+} FloatProperty;
+
+typedef struct {
+    byte value;
+    OptionalGUID id;
+} BoolProperty;
+
+typedef struct {
+    UEString type;
+    //byte flag;
+    GUID id; // TODO: Optional or not??!
+    OptionalGUID optionalID;
+} StructPropertyMeta;
+
+typedef struct(char type[]) {
+    switch (type) {
+    case "Guid":
+        GUID value;
+        break;
+    case "DateTime":
+        uint64 value; // TODO: Determine time format
+        break;
+    case "Box":
+        Vec3 a;
+        Vec3 b;
+        byte null;
+        break;
+    default:
+        do {
+            UEProperty value;
+        } while (value.name.str != "None");
+        break;
+    }
+} StructPropertyValue <optimize=false>;
+
+typedef struct(uint32 count) {
+    StructPropertyMeta meta;
+    StructPropertyValue value(meta.type.str)[count];
+} StructProperty;
+
+typedef struct {
+    UEString type;
+    GUID id;
+    byte null;
+    uint32 count;
+    switch (type.str) {
+        case "StructProperty":
+            UEString type;
+            UEString name;
+            uint64 size;
+            UEString structType;
+            //if (id != 0) {
+                GUID id2;
+                byte null2;
+            //}
+            StructPropertyValue value(structType.str)[count] <optimize=false>;
+            break;
+        case "IntProperty":
+            int32 value[count];
+            break;
+        case "StrProperty":
+            UEString value[count] <optimize=false>;
+            break;
+        default:
+            Assert(false, "Not here");
+            UEPropertyTyped value(type.str)[count];
+            break;
+    }
+} ArrayProperty;
+
+typedef struct {
+    byte flag;
+    if (flag) {
+        GUID id;
+    }
+    UEString path;
+} ObjectProperty;
+
+typedef struct {
+    GUID id;
+    byte null;
+    UEString value;
+} StrProperty;
+
+typedef struct(char type[]) {
+    Printf("Reading %s\n", type);
+    switch (type) {
+        case "IntProperty":
+            IntProperty value;
+            break;
+        case "FloatProperty":
+            FloatProperty value;
+            break;
+        case "BoolProperty":
+            BoolProperty value;
+            break;
+        case "StructProperty":
+            StructProperty value(1);
+            break;
+        case "ArrayProperty":
+            ArrayProperty value;
+            break;
+        case "ObjectProperty":
+            ObjectProperty value;
+            break;
+        case "StrProperty":
+            StrProperty value;
+            break;
+    }
+} UEPropertyTyped;
+
+typedef struct {
+    UEString name;
+    if (name.str != "None") {
+        UEString type;
+        uint64 length;
+        // char data[length + 1];
+        UEPropertyTyped value(type.str);
+    }
+} UEProperty <bgcolor=cDkYellow, optimize=false>;
+
+typedef struct {
+    UEString saveGameType;
+    do {
+        UEProperty value;
+    } while (value.name.str != "None");
+    uint32 end <bgcolor=cWhite>;
+    Assert(end == 0, "Trailing bytes were not zero");
+} Save;
+
+LittleEndian();
+//SetBackColor( cLtPurple );
+Header header;
+
+Save save;
