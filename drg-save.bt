@@ -51,17 +51,21 @@ typedef struct {
     CustomFormatData customFormatData[customFormatDataCount];
 } Header;
 
-
 struct UEProperty;
 struct UEPropertyTyped;
 
 typedef struct {
-    byte null;
+    OptionalGUID id;
     int value;
 } IntProperty;
 
 typedef struct {
-    byte null;
+    OptionalGUID id;
+    uint32 value;
+} UInt32Property;
+
+typedef struct {
+    OptionalGUID id;
     float value;
 } FloatProperty;
 
@@ -69,6 +73,34 @@ typedef struct {
     byte value;
     OptionalGUID id;
 } BoolProperty;
+
+typedef struct {
+    OptionalGUID id;
+    UEString value;
+} StrProperty;
+
+typedef struct {
+    OptionalGUID id;
+    UEString path;
+} ObjectProperty;
+
+typedef struct {
+    UEString type;
+    OptionalGUID id;
+    uint32 idk;
+    uint32 count;
+    switch (type.str) {
+        case "StrProperty":
+            UEString value[count];
+            break;
+        case "IntProperty":
+            int32 value[count];
+            break;
+        default: // GUID
+            char value[16 * count]; // TODO: Array of GUIDs
+            break;
+    }
+} SetProperty <optimize=false>;
 
 typedef struct {
     UEString type;
@@ -105,8 +137,7 @@ typedef struct(uint32 count) {
 
 typedef struct {
     UEString type;
-    GUID id;
-    byte null;
+    OptionalGUID id;
     uint32 count;
     switch (type.str) {
         case "StructProperty":
@@ -126,6 +157,9 @@ typedef struct {
         case "StrProperty":
             UEString value[count] <optimize=false>;
             break;
+        case "ObjectProperty":
+            UEString value[count] <optimize=false>;
+            break;
         default:
             Assert(false, "Not here");
             UEPropertyTyped value(type.str)[count];
@@ -133,25 +167,103 @@ typedef struct {
     }
 } ArrayProperty;
 
-typedef struct {
-    byte flag;
-    if (flag) {
-        GUID id;
+typedef struct(char type[]) {
+    switch (type) {
+        case "StructProperty":
+            GUID value;
+            break;
+        case "DateTime":
+            uint64 value; // TODO: Determine time format
+            break;
+        case "Box":
+            Vec3 a;
+            Vec3 b;
+            byte null;
+            break;
+        case "StrProperty":
+            UEString value;
+            break;
+        case "IntProperty":
+            int32 value;
+            break;
+        case "BoolProperty":
+            byte value;
+            break;
+        case "FloatProperty":
+            float value;
+            break;
+        default:
+            do {
+                UEProperty value;
+            } while (value.name.str != "None");
+            break;
     }
-    UEString path;
-} ObjectProperty;
+} MapKeyType <optimize=false>;
+
+typedef struct(char type[]) {
+    switch (type) {
+        case "DateTime":
+            uint64 value; // TODO: Determine time format
+            break;
+        case "Box":
+            Vec3 a;
+            Vec3 b;
+            byte null;
+            break;
+        case "StrProperty":
+            UEString value;
+            break;
+        case "IntProperty":
+            int32 value;
+            break;
+        case "BoolProperty":
+            byte value;
+            break;
+        case "FloatProperty":
+            float value;
+            break;
+        default:
+            do {
+                UEProperty value;
+            } while (value.name.str != "None");
+            break;
+    }
+} MapValueType <optimize=false>;
+
+typedef struct(UEString &keyType, UEString &valueType) {
+    MapKeyType key(keyType.str);
+    MapValueType value(valueType.str);
+} MapEntry <optimize=false>;
 
 typedef struct {
-    GUID id;
-    byte null;
-    UEString value;
-} StrProperty;
+    UEString keyType;
+    UEString valueType;
+    OptionalGUID id;
+    uint32 idk;
+    uint32 count;
+    MapEntry value(keyType, valueType)[count] <optimize=false>;
+    //UEString type;
+    //UEPropertyTyped value(type.str);
+/*
+    UEString type2;
+    uint32 idk;
+    uint32 idk4;
+    OptionalGUID id;
+    uint32 idk2;
+    uint32 idk3;
+*/
+    //uint32 length;
+    //char data[16 * length]; // TODO: Array of GUIDs
+} MapProperty <optimize=false>;
 
 typedef struct(char type[]) {
     Printf("Reading %s\n", type);
     switch (type) {
         case "IntProperty":
             IntProperty value;
+            break;
+        case "UInt32Property":
+            UInt32Property value;
             break;
         case "FloatProperty":
             FloatProperty value;
@@ -170,6 +282,12 @@ typedef struct(char type[]) {
             break;
         case "StrProperty":
             StrProperty value;
+            break;
+        case "SetProperty":
+            SetProperty value;
+            break;
+        case "MapProperty":
+            MapProperty value;
             break;
     }
 } UEPropertyTyped;
