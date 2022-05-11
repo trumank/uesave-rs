@@ -32,6 +32,13 @@ typedef struct {
 } Vec3;
 
 typedef struct {
+    float r;
+    float g;
+    float b;
+    float a;
+} Color;
+
+typedef struct {
     GUID id;
     int32 value;
 } CustomFormatData <bgcolor=cLtBlue>;
@@ -81,8 +88,28 @@ typedef struct {
 
 typedef struct {
     OptionalGUID id;
+    int idk;
+    int idk;
+    short idk;
+    UEString key;
+    UEString value;
+} TextProperty;
+
+typedef struct {
+    OptionalGUID id;
     UEString path;
 } ObjectProperty;
+
+typedef struct {
+    UEString path;
+    UEString name;
+} MulticastInlineDelegateEntry <optimize=false>;
+
+typedef struct {
+    OptionalGUID id;
+    uint32 count;
+    MulticastInlineDelegateEntry entries[count];
+} MulticastInlineDelegateProperty;
 
 typedef struct {
     UEString type;
@@ -122,6 +149,15 @@ typedef struct(char type[]) {
         Vec3 b;
         byte null;
         break;
+    case "Vector":
+        Vec3 value;
+        break;
+    case "Rotator":
+        Vec3 value;
+        break;
+    case "LinearColor":
+        Color value;
+        break;
     default:
         do {
             UEProperty value;
@@ -153,6 +189,9 @@ typedef struct {
             break;
         case "IntProperty":
             int32 value[count];
+            break;
+        case "FloatProperty":
+            float value[count];
             break;
         case "StrProperty":
             UEString value[count] <optimize=false>;
@@ -242,18 +281,6 @@ typedef struct {
     uint32 idk;
     uint32 count;
     MapEntry value(keyType, valueType)[count] <optimize=false>;
-    //UEString type;
-    //UEPropertyTyped value(type.str);
-/*
-    UEString type2;
-    uint32 idk;
-    uint32 idk4;
-    OptionalGUID id;
-    uint32 idk2;
-    uint32 idk3;
-*/
-    //uint32 length;
-    //char data[16 * length]; // TODO: Array of GUIDs
 } MapProperty <optimize=false>;
 
 typedef struct(char type[]) {
@@ -283,6 +310,15 @@ typedef struct(char type[]) {
         case "StrProperty":
             StrProperty value;
             break;
+        case "NameProperty":
+            StrProperty value;
+            break;
+        case "TextProperty":
+            TextProperty value;
+            break;
+        case "MulticastInlineDelegateProperty":
+            MulticastInlineDelegateProperty value;
+            break;
         case "SetProperty":
             SetProperty value;
             break;
@@ -309,10 +345,9 @@ typedef struct {
     } while (value.name.str != "None");
     uint32 end <bgcolor=cWhite>;
     Assert(end == 0, "Trailing bytes were not zero");
+    Assert(FEof(), "End of file not reached");
 } Save;
 
 LittleEndian();
-//SetBackColor( cLtPurple );
 Header header;
-
 Save save;
