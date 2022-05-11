@@ -1,16 +1,3 @@
-//------------------------------------------------
-//--- 010 Editor v12.0.1 Binary Template
-//
-//      File: 
-//   Authors: 
-//   Version: 
-//   Purpose: 
-//  Category: 
-// File Mask: 
-//  ID Bytes: 
-//   History: 
-//------------------------------------------------
-
 typedef char ID[4];
 
 typedef struct {
@@ -28,6 +15,11 @@ typedef struct {
 typedef struct {
     float x;
     float y;
+} Vec2;
+
+typedef struct {
+    float x;
+    float y;
     float z;
 } Vec3;
 
@@ -37,6 +29,40 @@ typedef struct {
     float b;
     float a;
 } Color;
+
+typedef struct {
+    Vec3 a;
+    Vec3 b;
+    byte null;
+} Box;
+
+typedef struct {
+    byte magic; // TODO: No idea how this works, probably broken
+    switch (magic) {
+        case 2:
+            char buff[8];
+            break;
+        case 0:
+        case 8:
+            char buff[9];
+            UEString key;
+            break;
+        default:
+            Assert(false, Str("Unrecognized magic number: %u", magic));
+            break;
+    }
+    UEString value;
+} Text <optimize=false>;
+
+typedef struct {
+    UEString path;
+    UEString name;
+} MulticastInlineDelegateEntry <optimize=false>;
+
+typedef struct {
+    uint32 count;
+    MulticastInlineDelegateEntry entries[count];
+} MulticastInlineDelegate <optimize=false>;
 
 typedef struct {
     GUID id;
@@ -59,122 +85,68 @@ typedef struct {
 } Header;
 
 struct UEProperty;
-struct UEPropertyTyped;
 
 typedef struct {
-    OptionalGUID id;
-    int value;
-} IntProperty;
+    do {
+        UEProperty value;
+    } while (value.name.str != "None");
+} Struct <optimize=false>;
 
-typedef struct {
-    OptionalGUID id;
-    uint32 value;
-} UInt32Property;
-
-typedef struct {
-    OptionalGUID id;
-    float value;
-} FloatProperty;
-
-typedef struct {
-    byte value;
-    OptionalGUID id;
-} BoolProperty;
-
-typedef struct {
-    OptionalGUID id;
-    UEString value;
-} StrProperty;
-
-typedef struct {
-    OptionalGUID id;
-    int idk;
-    int idk;
-    short idk;
-    UEString key;
-    UEString value;
-} TextProperty;
-
-typedef struct {
-    OptionalGUID id;
-    UEString path;
-} ObjectProperty;
-
-typedef struct {
-    UEString path;
-    UEString name;
-} MulticastInlineDelegateEntry <optimize=false>;
-
-typedef struct {
-    OptionalGUID id;
-    uint32 count;
-    MulticastInlineDelegateEntry entries[count];
-} MulticastInlineDelegateProperty;
-
-typedef struct {
-    UEString type;
-    OptionalGUID id;
-    uint32 idk;
-    uint32 count;
-    switch (type.str) {
-        case "StrProperty":
-            UEString value[count];
+typedef struct(char type[], uint32 count) {
+    switch (type) {
+        case "Guid":
+            char value[16 * count]; // TODO: Array of GUIDs
+            break;
+        case "DateTime":
+            uint64 value[count]; // TODO: Determine time format
+            break;
+        case "Box":
+            Box box[count];
+            break;
+        case "Vector2D":
+            Vec2 value[count];
+            break;
+        case "Vector":
+            Vec3 value[count];
+            break;
+        case "Rotator":
+            Vec3 value[count];
+            break;
+        case "LinearColor":
+            Color value[count];
             break;
         case "IntProperty":
             int32 value[count];
             break;
-        default: // GUID
-            char value[16 * count]; // TODO: Array of GUIDs
+        case "UInt32Property":
+            uint32 value[count];
+            break;
+        case "FloatProperty":
+            float value[count];
+            break;
+        case "ByteProperty":
+            UEString value[count]; // Enum name
+            break;
+        case "BoolProperty":
+            byte value[count];
+            break;
+        case "ObjectProperty":
+        case "StrProperty":
+            UEString value[count];
+            break;
+        case "TextProperty":
+            Text value[count];
+            break;
+        case "MulticastInlineDelegateProperty":
+            MulticastInlineDelegate value[count];
+            break;
+        default:
+            Struct value[count];
             break;
     }
-} SetProperty <optimize=false>;
+} PropertyValue <optimize=false>;
 
 typedef struct {
-    UEString type;
-    //byte flag;
-    GUID id; // TODO: Optional or not??!
-    OptionalGUID optionalID;
-} StructPropertyMeta;
-
-typedef struct(char type[]) {
-    switch (type) {
-    case "Guid":
-        GUID value;
-        break;
-    case "DateTime":
-        uint64 value; // TODO: Determine time format
-        break;
-    case "Box":
-        Vec3 a;
-        Vec3 b;
-        byte null;
-        break;
-    case "Vector":
-        Vec3 value;
-        break;
-    case "Rotator":
-        Vec3 value;
-        break;
-    case "LinearColor":
-        Color value;
-        break;
-    default:
-        do {
-            UEProperty value;
-        } while (value.name.str != "None");
-        break;
-    }
-} StructPropertyValue <optimize=false>;
-
-typedef struct(uint32 count) {
-    StructPropertyMeta meta;
-    StructPropertyValue value(meta.type.str)[count];
-} StructProperty;
-
-typedef struct {
-    UEString type;
-    OptionalGUID id;
-    uint32 count;
     switch (type.str) {
         case "StructProperty":
             UEString type;
@@ -185,148 +157,29 @@ typedef struct {
                 GUID id2;
                 byte null2;
             //}
-            StructPropertyValue value(structType.str)[count] <optimize=false>;
-            break;
-        case "IntProperty":
-            int32 value[count];
-            break;
-        case "FloatProperty":
-            float value[count];
-            break;
-        case "StrProperty":
-            UEString value[count] <optimize=false>;
-            break;
-        case "ObjectProperty":
-            UEString value[count] <optimize=false>;
+            if (count > 0) PropertyValue value(structType.str, count) <optimize=false>;
             break;
         default:
-            Assert(false, "Not here");
-            UEPropertyTyped value(type.str)[count];
+            if (count > 0) PropertyValue value(type.str, count);
             break;
     }
-} ArrayProperty;
+} ArrayValue;
 
 typedef struct(char type[]) {
     switch (type) {
         case "StructProperty":
             GUID value;
             break;
-        case "DateTime":
-            uint64 value; // TODO: Determine time format
-            break;
-        case "Box":
-            Vec3 a;
-            Vec3 b;
-            byte null;
-            break;
-        case "StrProperty":
-            UEString value;
-            break;
-        case "IntProperty":
-            int32 value;
-            break;
-        case "BoolProperty":
-            byte value;
-            break;
-        case "FloatProperty":
-            float value;
-            break;
         default:
-            do {
-                UEProperty value;
-            } while (value.name.str != "None");
+            PropertyValue value(type, 1);
             break;
     }
-} MapKeyType <optimize=false>;
-
-typedef struct(char type[]) {
-    switch (type) {
-        case "DateTime":
-            uint64 value; // TODO: Determine time format
-            break;
-        case "Box":
-            Vec3 a;
-            Vec3 b;
-            byte null;
-            break;
-        case "StrProperty":
-            UEString value;
-            break;
-        case "IntProperty":
-            int32 value;
-            break;
-        case "BoolProperty":
-            byte value;
-            break;
-        case "FloatProperty":
-            float value;
-            break;
-        default:
-            do {
-                UEProperty value;
-            } while (value.name.str != "None");
-            break;
-    }
-} MapValueType <optimize=false>;
+} KeyValue <optimize=false>;
 
 typedef struct(UEString &keyType, UEString &valueType) {
-    MapKeyType key(keyType.str);
-    MapValueType value(valueType.str);
+    KeyValue key(keyType.str);
+    PropertyValue value(valueType.str, 1);
 } MapEntry <optimize=false>;
-
-typedef struct {
-    UEString keyType;
-    UEString valueType;
-    OptionalGUID id;
-    uint32 idk;
-    uint32 count;
-    MapEntry value(keyType, valueType)[count] <optimize=false>;
-} MapProperty <optimize=false>;
-
-typedef struct(char type[]) {
-    Printf("Reading %s\n", type);
-    switch (type) {
-        case "IntProperty":
-            IntProperty value;
-            break;
-        case "UInt32Property":
-            UInt32Property value;
-            break;
-        case "FloatProperty":
-            FloatProperty value;
-            break;
-        case "BoolProperty":
-            BoolProperty value;
-            break;
-        case "StructProperty":
-            StructProperty value(1);
-            break;
-        case "ArrayProperty":
-            ArrayProperty value;
-            break;
-        case "ObjectProperty":
-            ObjectProperty value;
-            break;
-        case "StrProperty":
-            StrProperty value;
-            break;
-        case "NameProperty":
-            StrProperty value;
-            break;
-        case "TextProperty":
-            TextProperty value;
-            break;
-        case "MulticastInlineDelegateProperty":
-            MulticastInlineDelegateProperty value;
-            break;
-        case "SetProperty":
-            SetProperty value;
-            break;
-        case "MapProperty":
-            MapProperty value;
-            break;
-    }
-} UEPropertyTyped;
 
 typedef struct {
     UEString name;
@@ -334,7 +187,76 @@ typedef struct {
         UEString type;
         uint64 length;
         // char data[length + 1];
-        UEPropertyTyped value(type.str);
+        //Printf("Reading %s\n", type.str);
+        switch (type.str) {
+            case "IntProperty":
+                OptionalGUID id;
+                PropertyValue value(type.str, 1);
+                break;
+            case "UInt32Property":
+                OptionalGUID id;
+                PropertyValue value(type.str, 1);
+                break;
+            case "FloatProperty":
+                OptionalGUID id;
+                PropertyValue value(type.str, 1);
+                break;
+            case "BoolProperty":
+                PropertyValue value(type.str, 1);
+                OptionalGUID id;
+                break;
+            case "StructProperty":
+                UEString type;
+                GUID id;
+                OptionalGUID optionalID;
+                PropertyValue value(type.str, 1);
+                break;
+            case "ArrayProperty":
+                UEString type;
+                OptionalGUID id;
+                uint32 count;
+                ArrayValue value;
+                break;
+            case "ObjectProperty":
+                OptionalGUID id;
+                PropertyValue value(type.str, 1);
+                break;
+            case "StrProperty":
+            case "NameProperty":
+                OptionalGUID id;
+                PropertyValue value(type.str, 1);
+                break;
+            case "TextProperty":
+                OptionalGUID id;
+                PropertyValue value(type.str, 1);
+                break;
+            case "MulticastInlineDelegateProperty":
+                OptionalGUID id;
+                PropertyValue value(type.str, 1);
+                break;
+            case "SetProperty":
+                UEString type;
+                OptionalGUID id;
+                uint32 idk;
+                uint32 count;
+                switch (type.str) {
+                    case "StructProperty":
+                        char value[16 * count]; // TODO: Array of GUIDs
+                        break;
+                    default:
+                        PropertyValue value(type.str, count);
+                        break;
+                }
+                break;
+            case "MapProperty":
+                UEString keyType;
+                UEString valueType;
+                OptionalGUID id;
+                uint32 idk;
+                uint32 count;
+                if (count > 0) MapEntry value(keyType, valueType)[count] <optimize=false>;
+                break;
+        }
     }
 } UEProperty <bgcolor=cDkYellow, optimize=false>;
 
