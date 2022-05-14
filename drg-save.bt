@@ -146,25 +146,6 @@ typedef struct(char type[], uint32 count) {
     }
 } PropertyValue <optimize=false>;
 
-typedef struct {
-    switch (type.str) {
-        case "StructProperty":
-            UEString type;
-            UEString name;
-            uint64 size;
-            UEString structType;
-            //if (id != 0) {
-                GUID id2;
-                byte null2;
-            //}
-            if (count > 0) PropertyValue value(structType.str, count) <optimize=false>;
-            break;
-        default:
-            if (count > 0) PropertyValue value(type.str, count);
-            break;
-    }
-} ArrayValue;
-
 typedef struct(char type[]) {
     switch (type) {
         case "StructProperty":
@@ -220,7 +201,20 @@ typedef struct {
                 UEString type;
                 OptionalGUID id;
                 uint32 count;
-                ArrayValue value;
+                switch (type.str) {
+                    case "StructProperty":
+                        UEString type;
+                        UEString name;
+                        uint64 size;
+                        UEString structType;
+                        GUID id2;
+                        byte null2;
+                        if (count > 0) PropertyValue value(structType.str, count) <optimize=false>;
+                        break;
+                    default:
+                        if (count > 0) PropertyValue value(type.str, count);
+                        break;
+                }
                 break;
             case "ObjectProperty":
                 OptionalGUID id;
