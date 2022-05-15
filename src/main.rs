@@ -1,6 +1,5 @@
 use nom::*;
-
-use nom_derive::*;
+use nom_locate::LocatedSpan;
 
 fn read_bool(data: &[u8]) -> nom::IResult<&[u8], bool> {
     combinator::map(number::complete::u8, |n: u8| n > 0)(data)
@@ -26,16 +25,6 @@ fn read_string(data: &[u8]) -> nom::IResult<&[u8], &str> {
     )(data)
 }
 
-fn read_property(data: &[u8]) -> nom::IResult<&[u8], Property> {
-    let (data, name) = read_string(data)?;
-    let (data, (t, _)) = sequence::tuple((
-        read_type,
-        number::complete::le_u64,
-    ))(data)?;
-    let (data, value) = PropertyValue::parse(data, t)?;
-    Ok((data, Property { name, value }))
-}
-
 fn read_type(data: &[u8]) -> nom::IResult<&[u8], PropertyType, nom::error::Error<&[u8]>> {
     let (data, t) = read_string(data)?;
     Ok((data, match t {
@@ -53,7 +42,8 @@ fn read_type(data: &[u8]) -> nom::IResult<&[u8], PropertyType, nom::error::Error
         "MulticastInlineDelegateProperty" => PropertyType::MulticastInlineDelegateProperty,
         "SetProperty" => PropertyType::SetProperty,
         "MapProperty" => PropertyType::MapProperty,
-        _ => panic!("Unknown property type: {}", t), // TODO: Figure out how tf to handle errors with nom
+        "None" => panic!("PropertyType cannot be None"),
+        _ => PropertyType::Other(t),
     }))
 }
 
@@ -61,8 +51,8 @@ fn read_none(data: &[u8]) -> nom::IResult<&[u8], &[u8]> {
     bytes::complete::tag("\x05\x00\x00\x00None\x00")(data)
 }
 
-#[derive(PartialEq,Eq)]
-pub enum PropertyType {
+#[derive(Debug,PartialEq,Eq)]
+pub enum PropertyType<'a> {
     IntProperty,
     UInt32Property,
     FloatProperty,
@@ -77,6 +67,97 @@ pub enum PropertyType {
     MulticastInlineDelegateProperty,
     SetProperty,
     MapProperty,
+    Other(&'a str),
+}
+
+pub trait Read<T> {
+    fn read(data: T) -> nom::IResult<T, Self> where Self: Sized;
+}
+
+#[derive(Debug,PartialEq)] pub struct Int(i32);
+#[derive(Debug,PartialEq)] pub struct UInt32(u32);
+#[derive(Debug,PartialEq)] pub struct Float(f32);
+#[derive(Debug,PartialEq)] pub struct Bool(bool);
+#[derive(Debug,PartialEq)] pub struct Byte<'a>(&'a str);
+#[derive(Debug,PartialEq,Eq,Hash)] pub struct StructKey(uuid::Uuid);
+#[derive(Debug,PartialEq)] pub struct StructValue<'a>(Vec<Property<'a>>);
+#[derive(Debug,PartialEq)] pub struct Object<'a>(&'a str);
+#[derive(Debug,PartialEq)] pub struct Name<'a>(&'a str);
+#[derive(Debug,PartialEq)] pub struct Str<'a>(&'a str);
+#[derive(Debug,PartialEq)] pub struct Text<'a>(&'a str); // TOOD: Special text voodoo
+#[derive(Debug,PartialEq)] pub struct Set(Vec<ValueKey>);
+#[derive(Debug,PartialEq)] pub struct MapEntry<'a> {
+    key: ValueKey,
+    value: ValueValue<'a>,
+}
+#[derive(Debug,PartialEq)] pub struct Map<'a>(Vec<MapEntry<'a>>);
+
+// Base value to be extended
+#[derive(Debug,PartialEq)]
+pub enum ValueBase <'a> {
+    Int(Int),
+    UInt32(UInt32),
+    Float(Float),
+    Byte(Byte<'a>),
+}
+
+// Full values
+#[derive(Debug,PartialEq)]
+pub enum ValueValue<'a> {
+    Base(ValueBase<'a>),
+    Struct(StructValue<'a>),
+}
+
+// Values used as keys for SetProperty and MapProperty
+#[derive(Debug,PartialEq,Eq,Hash)]
+pub enum ValueKey {
+    //Base(ValueBase<'a>),
+    Struct(StructKey),
+}
+
+// Array of values used by ArrayProperty
+#[derive(Debug,PartialEq)]
+pub enum ValueArray<'a> {
+    Int(Vec<Int>),
+    UInt32(Vec<UInt32>),
+    Float(Vec<Float>),
+    Byte(Vec<Byte<'a>>),
+}
+
+// Values with IDs present in the top level object and StructProperty
+#[derive(Debug,PartialEq)]
+pub enum PropertyValue<'a> {
+    Int {
+        id: Option<uuid::Uuid>,
+        value: Int,
+    },
+    UInt32 {
+        id: Option<uuid::Uuid>,
+        value: UInt32,
+    },
+    Float {
+        id: Option<uuid::Uuid>,
+        value: Float,
+    },
+    Bool {
+        id: Option<uuid::Uuid>,
+        value: Bool,
+    },
+    Byte {
+        id: Option<uuid::Uuid>,
+        value: Byte<'a>,
+        enum_type: &'a str,
+    },
+    Struct {
+        id: Option<uuid::Uuid>,
+        value: StructValue<'a>,
+        struct_type: &'a str,
+        struct_id: uuid::Uuid,
+    },
+    Array {
+        id: Option<uuid::Uuid>,
+        value: ValueArray<'a>,
+    }
 }
 
 #[derive(Debug,PartialEq)]
@@ -85,173 +166,204 @@ pub struct Property<'a> {
     value: PropertyValue<'a>,
 }
 
-type IntProperty = i32;
-type UInt32Property = i32;
-type FloatProperty = f32;
-type BoolProperty = bool;
-
-#[derive(Debug,PartialEq,Eq,NomLE)]
-pub struct ByteProperty<'a> {
-    #[nom(Parse = "read_string")]
-    enum_value: &'a str
-}
-
-#[derive(Debug,PartialEq,NomLE)]
-pub struct StructProperty<'a> {
-    #[nom(Parse = "combinator::map(multi::many_till(read_property, read_none), |r| r.0)")]
-    properties: Vec<Property<'a>>,
-}
-
-#[derive(Debug,PartialEq,NomLE)]
-#[nom(Selector = "PropertyType")]
-pub enum PropertyValue<'a> {
-    #[nom(Selector = "PropertyType::IntProperty")]
-    IntProperty {
-        #[nom(Parse = "read_optional_uuid")]
-        id: Option<uuid::Uuid>,
-        value: IntProperty,
-    },
-    #[nom(Selector = "PropertyType::UInt32Property")]
-    UInt32Property {
-        #[nom(Parse = "read_optional_uuid")]
-        id: Option<uuid::Uuid>,
-        value: UInt32Property,
-    },
-    #[nom(Selector = "PropertyType::FloatProperty")]
-    FloatProperty {
-        #[nom(Parse = "read_optional_uuid")]
-        id: Option<uuid::Uuid>,
-        value: FloatProperty,
-    },
-    #[nom(Selector = "PropertyType::BoolProperty")]
-    BoolProperty {
-        #[nom(Parse = "read_bool")]
-        value: BoolProperty,
-        #[nom(Parse = "read_optional_uuid")]
-        id: Option<uuid::Uuid>,
-    },
-    #[nom(Selector = "PropertyType::ByteProperty")]
-    ByteProperty {
-        #[nom(Parse = "read_string")]
-        enum_type: &'a str,
-        #[nom(Parse = "read_optional_uuid")]
-        id: Option<uuid::Uuid>,
-        value: ByteProperty<'a>,
-    },
-    #[nom(Selector = "PropertyType::StructProperty")]
-    StructProperty {
-        #[nom(Parse = "read_string")]
-        struct_type: &'a str,
-        #[nom(Parse = "read_uuid")]
-        struct_id: uuid::Uuid,
-        #[nom(Parse = "read_optional_uuid")]
-        id: Option<uuid::Uuid>,
-        value: StructProperty<'a>,
-    },
-    #[nom(Selector = "PropertyType::ArrayProperty")]
-    ArrayProperty {
-        #[nom(Parse = "read_string")]
-        array_type: &'a str,
-        #[nom(Parse = "read_optional_uuid")]
-        id: Option<uuid::Uuid>,
-        value: StructProperty<'a>,
-    },
-}
-
-pub trait Read<T> {
-    fn read(data: T) -> nom::IResult<T, Self> where Self: Sized;
-}
-
-pub struct Int(i32);
-pub struct UInt32(u32);
-pub struct Float(f32);
-pub struct Byte<'a>(&'a str);
-pub struct StructKey<'a>(&'a str);
-pub struct StructValue<'a>(&'a str);
-
-pub enum PropertyBase <'a> {
-    Int(Int),
-    UInt32(UInt32),
-    Float(Float),
-    Byte(Byte<'a>),
-}
-
-pub enum PropertyKey<'a> {
-    Base(PropertyBase<'a>),
-    Struct(StructKey<'a>),
-}
-
-pub enum PropertyValueASDF<'a> {
-    Base(PropertyBase<'a>),
-    StructValue(StructKey<'a>),
-}
-
-pub enum PropertyArray<'a> {
-    Int(Vec<Int>),
-    UInt32(Vec<UInt32>),
-    Float(Vec<Float>),
-    Byte(Vec<Byte<'a>>),
+impl<'a> Read<&'a [u8]> for Property<'a> {
+    fn read(data: &'a [u8]) -> nom::IResult<&'a [u8], Self> {
+        let (data, (name, t, _length)) = sequence::tuple((
+            read_string,
+            read_type,
+            number::complete::le_u64,
+        ))(data)?;
+        let (data, value) = read_property_value(data, t)?;
+        Ok((data, Property { name, value }))
+    }
 }
 
 impl Read<&[u8]> for Int    { fn read(data: &[u8]) -> nom::IResult<&[u8], Self> { combinator::map(number::complete::le_i32, Int   )(data) } }
 impl Read<&[u8]> for UInt32 { fn read(data: &[u8]) -> nom::IResult<&[u8], Self> { combinator::map(number::complete::le_u32, UInt32)(data) } }
 impl Read<&[u8]> for Float  { fn read(data: &[u8]) -> nom::IResult<&[u8], Self> { combinator::map(number::complete::le_f32, Float )(data) } }
+impl Read<&[u8]> for Bool   { fn read(data: &[u8]) -> nom::IResult<&[u8], Self> { combinator::map(read_bool,                Bool  )(data) } }
+impl<'a> Read<&'a [u8]> for Str<'a>    { fn read(data: &'a [u8]) -> nom::IResult<&'a [u8], Self> { combinator::map(read_string,              Str   )(data) } }
+impl<'a> Read<&'a [u8]> for Name<'a>   { fn read(data: &'a [u8]) -> nom::IResult<&'a [u8], Self> { combinator::map(read_string,              Name  )(data) } }
+impl<'a> Read<&'a [u8]> for Object<'a>   { fn read(data: &'a [u8]) -> nom::IResult<&'a [u8], Self> { combinator::map(read_string,            Object)(data) } }
 impl<'a> Read<&'a [u8]> for Byte<'a> {
     fn read(data: &'a [u8]) -> nom::IResult<&'a [u8], Self> {
         combinator::map(read_string, Byte)(data)
     }
 }
+impl<'a> Read<&'a [u8]> for StructValue<'a> {
+    fn read(data: &'a [u8]) -> nom::IResult<&'a [u8], Self> {
+        combinator::map(multi::many_till(Property::read, read_none), |(value, _)| StructValue(value))(data)
+    }
+}
 
 
-fn read_property_array_helper<'a, T, R, F>(data: &'a [u8], count: usize, map: F) -> nom::IResult<&'a [u8], R>
+fn read_value_array_helper<'a, T, R, F>(data: &'a [u8], count: usize, map: F) -> nom::IResult<&'a [u8], R>
     where T: Read<&'a [u8]>,
           F: FnMut(Vec<T>) -> R {
     combinator::map(multi::count(T::read, count), map)(data)
 }
-fn read_property_array(data: &[u8], t: PropertyType, count: usize) -> nom::IResult<&[u8], PropertyArray> {
+fn read_value_array<'a>(data: &'a [u8], t: PropertyType<'a>, count: usize) -> nom::IResult<&'a [u8], ValueArray<'a>> {
     match t {
-        PropertyType::IntProperty => read_property_array_helper(data, count, PropertyArray::Int),
-        PropertyType::UInt32Property => read_property_array_helper(data, count, PropertyArray::UInt32),
-        PropertyType::FloatProperty => read_property_array_helper(data, count, PropertyArray::Float),
-        PropertyType::ByteProperty => read_property_array_helper(data, count, PropertyArray::Byte),
-        _ => panic!()
+        PropertyType::IntProperty => read_value_array_helper(data, count, ValueArray::Int),
+        PropertyType::UInt32Property => read_value_array_helper(data, count, ValueArray::UInt32),
+        PropertyType::FloatProperty => read_value_array_helper(data, count, ValueArray::Float),
+        PropertyType::ByteProperty => read_value_array_helper(data, count, ValueArray::Byte),
+        _ => panic!("Missing ValueArray {:?}", t)
     }
 }
 
-#[derive(Debug,PartialEq,Eq,NomLE)]
+fn read_value_value_helper<'a, T, R, F>(data: &'a [u8], map: F) -> nom::IResult<&'a [u8], R>
+    where T: Read<&'a [u8]>,
+          F: FnMut(T) -> R {
+    combinator::map(T::read, map)(data)
+}
+fn read_value_value<'a>(data: &'a [u8], t: PropertyType<'a>) -> nom::IResult<&'a [u8], ValueValue<'a>> {
+    match t {
+        PropertyType::IntProperty => read_value_value_helper(data, |r| ValueValue::Base(ValueBase::Int(r))),
+        PropertyType::UInt32Property => read_value_value_helper(data, |r| ValueValue::Base(ValueBase::UInt32(r))),
+        PropertyType::FloatProperty => read_value_value_helper(data, |r| ValueValue::Base(ValueBase::Float(r))),
+        PropertyType::ByteProperty => read_value_value_helper(data, |r| ValueValue::Base(ValueBase::Byte(r))),
+        //PropertyType::StructProperty => read_value_value_helper(data, |r| ValueValue::Struct(r)),
+        _ => panic!("Missing ValueValue {:?}", t)
+    }
+}
+fn read_property_value<'a>(data: &'a [u8], t: PropertyType<'a>) -> nom::IResult<&'a [u8], PropertyValue<'a>> {
+    match t {
+        PropertyType::IntProperty => {
+            combinator::map(sequence::tuple((read_optional_uuid, Int::read)), |(id, value)| PropertyValue::Int { id, value })(data)
+        },
+        PropertyType::UInt32Property => {
+            combinator::map(sequence::tuple((read_optional_uuid, UInt32::read)), |(id, value)| PropertyValue::UInt32 { id, value })(data)
+        },
+        PropertyType::FloatProperty => {
+            combinator::map(sequence::tuple((read_optional_uuid, Float::read)), |(id, value)| PropertyValue::Float { id, value })(data)
+        },
+        PropertyType::BoolProperty => {
+            combinator::map(sequence::tuple((Bool::read, read_optional_uuid)), |(value, id)| PropertyValue::Bool { id, value })(data)
+        },
+        PropertyType::ByteProperty => {
+            combinator::map(sequence::tuple((read_optional_uuid, read_string, Byte::read)), |(id, enum_type, value)| PropertyValue::Byte { id, enum_type, value })(data)
+        },
+        PropertyType::StructProperty => {
+            combinator::map(sequence::tuple((read_string, read_uuid, read_optional_uuid, StructValue::read)), |(struct_type, struct_id, id, value)| PropertyValue::Struct { id, value, struct_type, struct_id })(data)
+        },
+        PropertyType::ArrayProperty => {
+            let (data, (array_type, id, count)) = sequence::tuple((read_type, read_optional_uuid, number::complete::le_u32))(data)?;
+            let (data, value) = read_value_array(data, array_type, count as usize)?;
+            Ok((data, PropertyValue::Array { id, value }))
+        },
+        _ => panic!("Missing PropertyValue {:?}", t)
+    }
+}
+
+#[derive(Debug,PartialEq,Eq)]
 pub struct CustomFormatData {
-    #[nom(Parse = "read_uuid")]
     pub id: uuid::Uuid,
     pub value: i32,
 }
-#[derive(Debug,PartialEq,Eq,NomLE)]
+impl Read<&[u8]> for CustomFormatData {
+    fn read(data: &[u8]) -> nom::IResult<&[u8], Self> {
+        combinator::map(sequence::tuple((
+            read_uuid,
+            number::complete::le_i32,
+        )), |(
+            id,
+            value,
+        )| CustomFormatData {
+            id,
+            value,
+        })(data)
+    }
+}
+
+#[derive(Debug,PartialEq,Eq)]
 pub struct Header<'a> {
-    #[nom(Parse = "nom::bytes::complete::tag(\"GVAS\")")]
-    pub magic: &'a[u8],
     pub save_game_version: u32,
     pub package_version: u32,
     pub engine_version_major: u16,
     pub engine_version_minor: u16,
     pub engine_version_patch: u16,
     pub engine_version_build: u32,
-    #[nom(Parse = "read_string")]
     pub engine_version: &'a str,
     pub custom_format_version: u32,
-    #[nom(LengthCount = "nom::number::complete::le_u32")]
     pub custom_format: Vec<CustomFormatData>,
 }
-
-#[derive(Debug,PartialEq,NomLE)]
-pub struct Root<'a> {
-    #[nom(Parse = "read_string")]
-    pub save_game_type: &'a str,
-    pub root: StructProperty<'a>,
+impl<'a> Read<&'a [u8]> for Header<'a> {
+    fn read(data: &'a [u8]) -> nom::IResult<&'a [u8], Self> {
+        combinator::map(sequence::tuple((
+            bytes::complete::tag("GVAS"),
+            number::complete::le_u32,
+            number::complete::le_u32,
+            number::complete::le_u16,
+            number::complete::le_u16,
+            number::complete::le_u16,
+            number::complete::le_u32,
+            read_string,
+            number::complete::le_u32,
+            multi::length_count(number::complete::le_u32, CustomFormatData::read),
+        )), |(
+            _,
+            save_game_version,
+            package_version,
+            engine_version_major,
+            engine_version_minor,
+            engine_version_patch,
+            engine_version_build,
+            engine_version,
+            custom_format_version,
+            custom_format,
+        )| Header {
+            save_game_version,
+            package_version,
+            engine_version_major,
+            engine_version_minor,
+            engine_version_patch,
+            engine_version_build,
+            engine_version,
+            custom_format_version,
+            custom_format,
+        })(data)
+    }
 }
 
-#[derive(Debug,PartialEq,NomLE)]
+#[derive(Debug,PartialEq)]
+pub struct Root<'a> {
+    pub save_game_type: &'a str,
+    pub root: StructValue<'a>,
+}
+impl<'a> Read<&'a [u8]> for Root<'a> {
+    fn read(data: &'a [u8]) -> nom::IResult<&'a [u8], Self> {
+        combinator::map(sequence::tuple((
+            read_string,
+            StructValue::read,
+        )), |(
+            save_game_type,
+            root,
+        )| Root {
+            save_game_type,
+            root,
+        })(data)
+    }
+}
+
+#[derive(Debug,PartialEq)]
 pub struct Save<'a> {
     pub header: Header<'a>,
     pub root: Root<'a>,
+}
+impl<'a> Read<&'a [u8]> for Save<'a> {
+    fn read(data: &'a [u8]) -> nom::IResult<&'a [u8], Self> {
+        combinator::map(sequence::tuple((
+            Header::read,
+            Root::read,
+        )), |(
+            header,
+            root,
+        )| Save {
+            header,
+            root,
+        })(data)
+    }
 }
 
 fn main() {
@@ -280,12 +392,18 @@ mod tests {
         assert_eq!(read_string(b"\x01\x00\x00\x00\x00").unwrap(), (&b""[..], ""));
     }
 
+    #[test]
+    fn test_read_int() {
+        assert_eq!(Int::read(b"\x02\x00\x00\x00").unwrap(), (&b""[..], Int(2)));
+        assert_eq!(sequence::tuple((read_optional_uuid, Int::read))(b"\x00\x02\x00\x00\x00").unwrap(), (&b""[..], (None, Int(2))));
+        assert_eq!(combinator::map(sequence::tuple((read_optional_uuid, Int::read)), |(id, value)| PropertyValue::Int { id, value })(b"\x00\x02\x00\x00\x00").unwrap(), (&b""[..], PropertyValue::Int{id: None, value: Int(2)}));
+    }
+
 
     static SAVE: &'static [u8] = include_bytes!("../trash/test/76561198083438003_Experimental_Player_Slot_dsaf.sav");
     #[test]
     fn test_read_header() {
-        assert_eq!(nom::error::dbg_dmp(Header::parse, "asdf")(SAVE).unwrap().1, Header {
-            magic: "GVAS".as_bytes(),
+        assert_eq!(Header::read(SAVE).unwrap().1, Header {
             save_game_version: 2,
             package_version: 522,
             engine_version_major: 4,
@@ -351,9 +469,7 @@ mod tests {
 
     #[test]
     fn test_read_save() {
-        let data = SAVE;
-        let (data, header) = Header::parse(data).unwrap();
-        let (data, root) = Root::parse(data).unwrap();
+        let save = Save::read(SAVE).unwrap();
         //println!("{:?}", property1);
         //println!("{:?}", sequence::tuple((Header::parse, Root::parse))(SAVE).unwrap().1.1);
         //assert_eq!(read_string(b"\x01\x00\x00\x00\x00").unwrap(), (&b""[..], ""));
@@ -361,46 +477,98 @@ mod tests {
 
     #[test]
     fn test_read_property_value() {
-        assert_eq!(PropertyValue::parse(b"\x01\x19\x4D\x0C\x43\x70\x49\x54\x71\x69\x9B\x69\x87\xE5\xB0\x90\xDF\x0A\x00\x00\x00", PropertyType::IntProperty).unwrap(), (&b""[..], PropertyValue::IntProperty { id: Some(uuid::uuid!("430c4d1949707154699b6987e5b090df")), value: 10 } ));
-        assert_eq!(PropertyValue::parse(b"\x00\x0A\x00\x00\x00", PropertyType::IntProperty).unwrap(), (&b""[..], PropertyValue::IntProperty { id: None, value: 10 } ));
+        assert_eq!(read_property_value(b"\x01\x19\x4D\x0C\x43\x70\x49\x54\x71\x69\x9B\x69\x87\xE5\xB0\x90\xDF\x0A\x00\x00\x00", PropertyType::IntProperty).unwrap(), (&b""[..], PropertyValue::Int { id: Some(uuid::uuid!("430c4d1949707154699b6987e5b090df")), value: Int(10) } ));
+        //assert_eq!(PropertyValue::parse(b"\x00\x0A\x00\x00\x00", PropertyType::IntProperty).unwrap(), (&b""[..], PropertyValue::IntProperty { id: None, value: 10 } ));
     }
 
     #[test]
     fn test_read_int_property() {
         assert_eq!(
-            read_property(b"\x0E\x00\x00\x00\x56\x65\x72\x73\x69\x6F\x6E\x4E\x75\x6D\x62\x65\x72\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00").unwrap(),
+            Property::read(b"\x0E\x00\x00\x00\x56\x65\x72\x73\x69\x6F\x6E\x4E\x75\x6D\x62\x65\x72\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00").unwrap(),
             (&b""[..], Property {
                 name: "VersionNumber",
-                value: PropertyValue::IntProperty {
+                value: PropertyValue::Int {
                     id: None,
-                    value: 2,
+                    value: Int(2),
                 }
             })
         );
     }
 
+    #[test]
+    fn test_read_struct_property() {
+        assert_eq!(Property::read(b"\x12\x00\x00\x00\x56\x61\x6E\x69\x74\x79\x4D\x61\x73\x74\x65\x72\x79\x53\x61\x76\x65\x00\x0F\x00\x00\x00\x53\x74\x72\x75\x63\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x8D\x00\x00\x00\x00\x00\x00\x00\x12\x00\x00\x00\x56\x61\x6E\x69\x74\x79\x4D\x61\x73\x74\x65\x72\x79\x53\x61\x76\x65\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x06\x00\x00\x00\x4C\x65\x76\x65\x6C\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x8C\x00\x00\x00\x03\x00\x00\x00\x58\x50\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x3A\x23\x00\x00\x1A\x00\x00\x00\x48\x61\x73\x41\x77\x61\x72\x64\x65\x64\x46\x6F\x72\x4F\x6C\x64\x50\x75\x72\x63\x68\x61\x73\x65\x73\x00\x0D\x00\x00\x00\x42\x6F\x6F\x6C\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x05\x00\x00\x00\x4E\x6F\x6E\x65\x00").unwrap(),
+            (&b""[..], Property {
+                name: "VanityMasterySave",
+                value: PropertyValue::Struct {
+                    id: None,
+                    value: StructValue(vec![
+                        Property {
+                            name: "Level",
+                            value: PropertyValue::Int {
+                                id: None,
+                                value: Int(140),
+                            },
+                        },
+                        Property {
+                            name: "XP",
+                            value: PropertyValue::Int {
+                                id: None,
+                                value: Int(9018),
+                            },
+                        },
+                        Property {
+                            name: "HasAwardedForOldPurchases",
+                            value: PropertyValue::Bool {
+                                id: None,
+                                value: Bool(true),
+                            },
+                        },
+                    ]),
+                    struct_type: "VanityMasterySave",
+                    struct_id: uuid::uuid!("00000000000000000000000000000000"),
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn test_read_array_property() {
+        assert_eq!(Property::read(b"\x0C\x00\x00\x00\x53\x74\x61\x74\x49\x6E\x64\x69\x63\x65\x73\x00\x0E\x00\x00\x00\x41\x72\x72\x61\x79\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x08\x00\x00\x00\x00\x00\x00\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00").unwrap(),
+            (&b""[..], Property {
+                name: "StatIndices",
+                value: PropertyValue::Array {
+                    id: None,
+                    value: ValueArray::Int(vec![Int(0)])
+                }
+            })
+        );
+    }
+
+
+
     static SAVE2: &'static [u8] = include_bytes!("../trash/test/Mods/Speedster/Config2.sav");
     #[test]
     fn test_read_save2() {
-        let save = Save::parse(SAVE2).unwrap();
-        println!("{:?}", save);
+        let save = Save::read(SAVE2).unwrap();
+        //println!("{:?}", save);
     }
 
     #[test]
     fn test_read_struct() {
         assert_eq!(
-            StructProperty::parse(b"\x0A\x00\x00\x00\x4D\x75\x6C\x65\x53\x70\x65\x65\x64\x00\x0E\x00\x00\x00\x46\x6C\x6F\x61\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\xC0\x79\x44\x05\x00\x00\x00\x4E\x6F\x6E\x65\x00").unwrap(),
-            (&b""[..], StructProperty {
-                properties: vec![
+            StructValue::read(b"\x0A\x00\x00\x00\x4D\x75\x6C\x65\x53\x70\x65\x65\x64\x00\x0E\x00\x00\x00\x46\x6C\x6F\x61\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\xC0\x79\x44\x05\x00\x00\x00\x4E\x6F\x6E\x65\x00").unwrap(),
+            (&b""[..], StructValue (
+                vec![
                     Property {
                         name: "MuleSpeed",
-                        value: PropertyValue::FloatProperty {
+                        value: PropertyValue::Float {
                             id: None,
-                            value: 999.0
+                            value: Float(999.0)
                         },
                     },
                 ]
-            })
+            ))
         );
     }
 
