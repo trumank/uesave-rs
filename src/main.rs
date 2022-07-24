@@ -1,43 +1,42 @@
 use nom::*;
 use nom_locate::LocatedSpan;
 
-type Span<'a> = LocatedSpan<&'a [u8]>;
+use nom_supreme::error::{ErrorTree, BaseErrorKind, StackContext, Expectation};
+use nom_supreme::parser_ext::ParserExt;
+
+pub type Span<'a> = &'a [u8];
+pub type ParseErr<'a> = ErrorTree<Span<'a>>;
 
 
 //trait NewTrait<'a>: nom::error::ParseError<Span<'a>> + nom::error::FromExternalError<Span<'a>, std::str::Utf8Error> {}
 
-fn read_bool<'a, E: nom::error::ParseError<Span<'a>>>(data: Span<'a>) -> nom::IResult<Span<'a>, bool, E> {
+fn read_bool<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, bool, ParseErr> {
     combinator::map(number::complete::u8, |n: u8| n > 0)(data)
 }
 
-fn read_uuid<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, uuid::Uuid, E>
-    where E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+fn read_uuid<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, uuid::Uuid, ParseErr> {
     let (data, uuid) = combinator::map(number::complete::le_u128, |n: u128| uuid::Builder::from_bytes_le(n.to_le_bytes()).into_uuid())(data)?;
     Ok((data, uuid))
 }
 
-fn read_optional_uuid<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Option<uuid::Uuid>, E>
-    where E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+fn read_optional_uuid<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Option<uuid::Uuid>, ParseErr> {
     let (data, flag) = number::complete::u8(data)?;
     combinator::cond(flag > 0, read_uuid)(data)
 }
 
-fn read_string<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, &'a str, E>
-    where
-        E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+fn read_string<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, &'a str, ParseErr> {
     error::context("read_string",
         sequence::terminated(
             combinator::map_res(
                 multi::length_data(combinator::map(number::complete::le_u32, |n| n - 1)),
-                |r: Span| std::str::from_utf8(r.fragment()),
+                |r: Span| std::str::from_utf8(r),
             ),
             bytes::complete::take(1usize)
         )
     )(data)
 }
 
-fn read_type<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, PropertyType, E>
-    where E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+fn read_type<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, PropertyType, ParseErr> {
     let (data, t) = read_string(data)?;
     Ok((data, match t {
         "IntProperty" => PropertyType::IntProperty,
@@ -59,8 +58,7 @@ fn read_type<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, PropertyType, E>
     }))
 }
 
-fn read_none<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Span<'a>, E>
-    where E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+fn read_none<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Span<'a>, ParseErr> {
     bytes::complete::tag("\x05\x00\x00\x00None\x00")(data)
 }
 
@@ -180,9 +178,7 @@ pub struct Property<'a> {
 }
 
 impl Property<'_> {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Property, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Property, ParseErr> {
         let (data, (name, t, _length)) = sequence::tuple((
             read_string,
             read_type,
@@ -194,65 +190,47 @@ impl Property<'_> {
 }
 
 impl Int {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Self, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Self, ParseErr> {
         combinator::map(number::complete::le_i32, Self)(data)
     }
 }
 impl UInt32 {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Self, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Self, ParseErr> {
         combinator::map(number::complete::le_u32, Self)(data)
     }
 }
 impl Float {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Self, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Self, ParseErr> {
         combinator::map(number::complete::le_f32, Self)(data)
     }
 }
 impl Bool {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Self, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Self, ParseErr> {
         combinator::map(read_bool, Self)(data)
     }
 }
 impl Str<'_> {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Str, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Str, ParseErr> {
         combinator::map(read_string, Str)(data)
     }
 }
 impl Name<'_> {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Name, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Name, ParseErr> {
         combinator::map(read_string, Name)(data)
     }
 }
 impl Object<'_> {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Object, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Object, ParseErr> {
         combinator::map(read_string, Object)(data)
     }
 }
 impl Byte<'_> {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Byte, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Byte, ParseErr> {
         combinator::map(read_string, Byte)(data)
     }
 }
 impl StructValue<'_> {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, StructValue, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, StructValue, ParseErr> {
         error::context(
             "StructValue",
             combinator::map(multi::many_till(Property::read, read_none), |(value, _)| StructValue(value))
@@ -260,9 +238,7 @@ impl StructValue<'_> {
     }
 }
 
-fn read_value_array<'a, E>(data: Span<'a>, t: PropertyType<'a>, count: usize) -> nom::IResult<Span<'a>, ValueArray<'a>, E>
-    where
-        E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+fn read_value_array<'a>(data: Span<'a>, t: PropertyType<'a>, count: usize) -> nom::IResult<Span<'a>, ValueArray<'a>, ParseErr<'a>> {
     match t {
         PropertyType::IntProperty => combinator::map(multi::count(Int::read, count), ValueArray::Int)(data),
         PropertyType::UInt32Property => combinator::map(multi::count(UInt32::read, count), ValueArray::UInt32)(data),
@@ -272,7 +248,7 @@ fn read_value_array<'a, E>(data: Span<'a>, t: PropertyType<'a>, count: usize) ->
     }
 }
 
-fn read_value_value<'a>(data: Span<'a>, t: PropertyType<'a>) -> nom::IResult<Span<'a>, ValueValue<'a>> {
+fn read_value_value<'a>(data: Span<'a>, t: PropertyType<'a>) -> nom::IResult<Span<'a>, ValueValue<'a>, ParseErr<'a>> {
     match t {
         PropertyType::IntProperty => combinator::map(Int::read, |r| ValueValue::Base(ValueBase::Int(r)))(data),
         PropertyType::UInt32Property => combinator::map(UInt32::read, |r| ValueValue::Base(ValueBase::UInt32(r)))(data),
@@ -282,9 +258,7 @@ fn read_value_value<'a>(data: Span<'a>, t: PropertyType<'a>) -> nom::IResult<Spa
         _ => panic!("Missing ValueValue {:?}", t)
     }
 }
-fn read_property_value<'a, E>(data: Span<'a>, t: PropertyType<'a>) -> nom::IResult<Span<'a>, PropertyValue<'a>, E>
-    where
-        E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+fn read_property_value<'a>(data: Span<'a>, t: PropertyType<'a>) -> nom::IResult<Span<'a>, PropertyValue<'a>, ParseErr<'a>> {
     match t {
         PropertyType::IntProperty => {
             combinator::map(sequence::tuple((read_optional_uuid, Int::read)), |(id, value)| PropertyValue::Int { id, value })(data)
@@ -319,9 +293,7 @@ pub struct CustomFormatData {
     pub value: i32,
 }
 impl CustomFormatData {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, CustomFormatData, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, CustomFormatData, ParseErr<'a>> {
         combinator::map(sequence::tuple((
             read_uuid,
             number::complete::le_i32,
@@ -348,20 +320,18 @@ pub struct Header<'a> {
     pub custom_format: Vec<CustomFormatData>,
 }
 impl Header<'_> {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Header, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
-        combinator::map(sequence::tuple((
-            bytes::complete::tag("GVAS"),
-            number::complete::le_u32,
-            number::complete::le_u32,
-            number::complete::le_u16,
-            number::complete::le_u16,
-            number::complete::le_u16,
-            number::complete::le_u32,
-            read_string,
-            number::complete::le_u32,
-            multi::length_count(number::complete::le_u32, CustomFormatData::read),
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Header, ParseErr<'a>> {
+        error::context("Header::read", combinator::map(sequence::tuple((
+            bytes::complete::tag("GVAS").context("magic"),
+            number::complete::le_u32.context("package_version"),
+            number::complete::le_u32.context(""),
+            number::complete::le_u16.context(""),
+            number::complete::le_u16.context(""),
+            number::complete::le_u16.context(""),
+            number::complete::le_u32.context(""),
+            read_string.context(""),
+            number::complete::le_u32.context(""),
+            multi::length_count(number::complete::le_u32, CustomFormatData::read).context(""),
         )), |(
             _,
             save_game_version,
@@ -383,7 +353,7 @@ impl Header<'_> {
             engine_version,
             custom_format_version,
             custom_format,
-        })(data)
+        }))(data)
     }
 }
 
@@ -393,10 +363,8 @@ pub struct Root<'a> {
     pub root: StructValue<'a>,
 }
 impl Root<'_> {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Root, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
-        error::context("Root", combinator::map(sequence::tuple((
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Root, ParseErr<'a>> {
+        error::context("Root::read", combinator::map(sequence::tuple((
             read_string,
             StructValue::read,
         )), |(
@@ -415,13 +383,11 @@ pub struct Save<'a> {
     pub root: Root<'a>,
 }
 impl Save<'_> {
-    fn read<'a, E>(data: Span<'a>) -> nom::IResult<Span<'a>, Save, E>
-        where
-            E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> {
+    fn read<'a>(data: Span<'a>) -> nom::IResult<Span<'a>, Save, ParseErr<'a>> {
         error::context("Save::read",
             combinator::map(sequence::tuple((
-                Header::read,
-                Root::read,
+                Header::read.context("header"),
+                Root::read.context("root"),
             )), |(
                 header,
                 root,
@@ -443,7 +409,7 @@ mod tests {
     use crate::*;
 
     fn map_tuple<'a, R>(data: (Span<'a>, R)) -> (&'a [u8], R) {
-        (data.0.fragment(), data.1)
+        (data.0, data.1)
     }
 
     fn read_helper<'a, R, F, E>(mut f: F, data: &'a [u8]) -> (&'a [u8], R)
@@ -451,7 +417,7 @@ mod tests {
             E: error::ParseError<Span<'a>> + error::ContextError<Span<'a>> + error::FromExternalError<Span<'a>, std::str::Utf8Error> + std::fmt::Debug,
             F: FnMut(Span<'a>) -> nom::IResult<Span<'a>, R, E>,
             R: std::fmt::Debug + std::cmp::PartialEq {
-        map_tuple(f(Span::new(data)).unwrap())
+        map_tuple(f(from_buffer(data)).unwrap())
     }
 
     fn assert_read<'a, R, F, E>(f: F, data: &'a [u8], expected: R)
@@ -462,10 +428,14 @@ mod tests {
         assert_eq!(read_helper(f, data), (&b""[..], expected));
     }
 
+    fn from_buffer<'a>(buffer: &'a [u8]) -> Span<'a> {
+        buffer
+    }
+
     #[test]
     fn test_uuid() {
         assert_read(
-            read_uuid::<nom::error::VerboseError<Span>>,
+            read_uuid,
             b"\x67\xB6\x6F\x72\xB3\xE8\x10\x4D\xA0\xE5\x82\xF5\xBF\x0F\x20\xDB",
             uuid::uuid!("726FB667-E8B3-4D10-A0E5-82F5BF0F20DB")
         );
@@ -474,22 +444,33 @@ mod tests {
     #[test]
     fn test_optional_uuid() {
         assert_read(
-            read_optional_uuid::<nom::error::VerboseError<Span>>,
+            read_optional_uuid,
             b"\x01\x67\xB6\x6F\x72\xB3\xE8\x10\x4D\xA0\xE5\x82\xF5\xBF\x0F\x20\xDB",
             Some(uuid::uuid!("726FB667-E8B3-4D10-A0E5-82F5BF0F20DB"))
         );
         assert_read(
-            read_optional_uuid::<nom::error::VerboseError<Span>>,
+            read_optional_uuid,
             b"\x00",
             None
         );
     }
 
+    fn finalize<'a, T>(expression: impl Parser<Span<'a>, T, ErrorTree<Span<'a>>>) -> impl FnMut(Span<'a>) -> Result<T, ErrorTree<nom_supreme::final_parser::ByteOffset>> {
+        nom_supreme::final_parser::final_parser(expression)
+    }
+
     #[test]
     fn test_read_string() {
-        assert_eq!(map_tuple(read_string::<nom::error::VerboseError<Span>>(Span::new(b"\x04\x00\x00\x00\x4D\x61\x78\x00")).unwrap()), (&b""[..], "Max"));
+        assert_eq!(map_tuple(read_string(from_buffer(b"\x04\x00\x00\x00\x4D\x61\x78\x00")).unwrap()), (&b""[..], "Max"));
+        assert_eq!(finalize(
+            sequence::tuple((
+                read_string.context("asdf"),
+                read_string.context("asdf2")
+            )).context("tuple")
+        )(from_buffer(b"\x04\x00\x00\x00\x4D\x61\x78\x00\x05\x00\x00\x00asdf\x00")).unwrap(), ("Max", "asdf"));
+        println!("{:#?}", finalize(Save::read)(from_buffer(b"GVAS\x04\x00\x00\x00\x4D\x61\x78\x00\x05\x00\x00\x00asdf\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00")).unwrap_err());
         assert_read(
-            read_string::<nom::error::VerboseError<Span>>,
+            read_string,
             b"\x01\x00\x00\x00\x00",
             ""
         );
@@ -498,17 +479,17 @@ mod tests {
     #[test]
     fn test_read_int() {
         assert_read(
-            Int::read::<nom::error::VerboseError<Span>>,
+            Int::read,
             b"\x02\x00\x00\x00",
             Int(2)
         );
         assert_read(
-            sequence::tuple((read_optional_uuid::<nom::error::VerboseError<Span>>, Int::read)),
+            sequence::tuple((read_optional_uuid, Int::read)),
             b"\x00\x02\x00\x00\x00",
             (None, Int(2))
         );
         assert_read(
-            combinator::map(sequence::tuple((read_optional_uuid::<nom::error::VerboseError<Span>>, Int::read)), |(id, value)| PropertyValue::Int { id, value }),
+            combinator::map(sequence::tuple((read_optional_uuid, Int::read)), |(id, value)| PropertyValue::Int { id, value }),
             b"\x00\x02\x00\x00\x00",
             PropertyValue::Int{id: None, value: Int(2)}
         );
@@ -519,7 +500,7 @@ mod tests {
     #[test]
     fn test_read_header() {
         assert_eq!(
-            read_helper(Header::read::<error::VerboseError<Span>>, SAVE).1,
+            read_helper(Header::read, SAVE).1,
             Header {
                 save_game_version: 2,
                 package_version: 522,
@@ -587,8 +568,8 @@ mod tests {
 
     #[test]
     fn test_read_save() {
-        let save = Save::read::<error::VerboseError<Span>>(Span::new(SAVE)).unwrap();
-        //println!("{:?}", property1);
+        let save = finalize(Save::read.context("what"))(from_buffer(SAVE));
+        println!("{:?}", save.unwrap());
         //println!("{:?}", sequence::tuple((Header::parse, Root::parse))(SAVE).unwrap().1.1);
         //assert_eq!(read_string(b"\x01\x00\x00\x00\x00").unwrap(), (&b""[..], ""));
     }
@@ -596,7 +577,7 @@ mod tests {
     #[test]
     fn test_read_property_value() {
         assert_read(
-            |data| read_property_value::<nom::error::VerboseError<Span>>(data, PropertyType::IntProperty),
+            |data| read_property_value(data, PropertyType::IntProperty),
             b"\x01\x19\x4D\x0C\x43\x70\x49\x54\x71\x69\x9B\x69\x87\xE5\xB0\x90\xDF\x0A\x00\x00\x00",
             PropertyValue::Int {
                 id: Some(uuid::uuid!("430c4d1949707154699b6987e5b090df")),
@@ -609,7 +590,7 @@ mod tests {
     #[test]
     fn test_read_int_property() {
         assert_read(
-            Property::read::<nom::error::VerboseError<Span>>,
+            Property::read,
             b"\x0E\x00\x00\x00\x56\x65\x72\x73\x69\x6F\x6E\x4E\x75\x6D\x62\x65\x72\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00",
             Property {
                 name: "VersionNumber",
@@ -624,7 +605,7 @@ mod tests {
     #[test]
     fn test_read_struct_property() {
         assert_read(
-            error::context("Property::read", Property::read::<nom::error::VerboseError<Span>>),
+            error::context("Property::read", Property::read),
             b"\x12\x00\x00\x00\x56\x61\x6E\x69\x74\x79\x4D\x61\x73\x74\x65\x72\x79\x53\x61\x76\x65\x00\x0F\x00\x00\x00\x53\x74\x72\x75\x63\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x8D\x00\x00\x00\x00\x00\x00\x00\x12\x00\x00\x00\x56\x61\x6E\x69\x74\x79\x4D\x61\x73\x74\x65\x72\x79\x53\x61\x76\x65\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x06\x00\x00\x00\x4C\x65\x76\x65\x6C\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x8C\x00\x00\x00\x03\x00\x00\x00\x58\x50\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x3A\x23\x00\x00\x1A\x00\x00\x00\x48\x61\x73\x41\x77\x61\x72\x64\x65\x64\x46\x6F\x72\x4F\x6C\x64\x50\x75\x72\x63\x68\x61\x73\x65\x73\x00\x0D\x00\x00\x00\x42\x6F\x6F\x6C\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x05\x00\x00\x00\x4E\x6F\x6E\x65\x00",
             Property {
                 name: "VanityMasterySave",
@@ -663,7 +644,7 @@ mod tests {
     #[test]
     fn test_read_array_property() {
         assert_read(
-            Property::read::<nom::error::VerboseError<Span>>,
+            Property::read,
             b"\x0C\x00\x00\x00\x53\x74\x61\x74\x49\x6E\x64\x69\x63\x65\x73\x00\x0E\x00\x00\x00\x41\x72\x72\x61\x79\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x08\x00\x00\x00\x00\x00\x00\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00",
             Property {
                 name: "StatIndices",
@@ -680,14 +661,14 @@ mod tests {
     static SAVE2: &'static [u8] = include_bytes!("../trash/test/Mods/Speedster/Config2.sav");
     #[test]
     fn test_read_save2() {
-        let save = Save::read::<error::VerboseError<Span>>(Span::new(SAVE2)).unwrap();
+        let save = Save::read(from_buffer(SAVE2)).unwrap();
         //println!("{:?}", save);
     }
 
     #[test]
     fn test_read_struct() {
         assert_read(
-            StructValue::read::<nom::error::VerboseError<Span>>,
+            StructValue::read,
             b"\x0A\x00\x00\x00\x4D\x75\x6C\x65\x53\x70\x65\x65\x64\x00\x0E\x00\x00\x00\x46\x6C\x6F\x61\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\xC0\x79\x44\x05\x00\x00\x00\x4E\x6F\x6E\x65\x00",
             StructValue (
                 vec![
