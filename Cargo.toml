@@ -12,6 +12,7 @@ uuid = "1.0.0"
 nom-derive = "0.10.0"
 nom_locate = "4.0.0"
 nom-supreme = "0.8.0"
+anyhow = "1.0.58"
 
 [dev-dependencies]
 pretty_assertions = "1.2.1"
