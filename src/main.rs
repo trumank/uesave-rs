@@ -23,10 +23,10 @@ fn read_optional_uuid(reader: &mut Reader) -> Result<Option<uuid::Uuid>> {
 }
 
 fn read_string(reader: &mut Reader) -> Result<String> {
-    let mut chars = vec![0; reader.read_u32::<LittleEndian>()? as usize - 1];
+    let mut chars = vec![0; reader.read_u32::<LittleEndian>()? as usize];
     reader.read(&mut chars)?;
-    reader.read_u8()?;
-    Ok(String::from_utf8_lossy(&chars).into_owned())
+    let mut len = chars.len();
+    Ok(String::from_utf8_lossy(&chars[..(1usize.max(len) - 1usize)]).into_owned())
 }
 fn write_string(writer: &mut Writer, string: &String) -> Result<()> {
     writer.write_u32::<LittleEndian>(string.as_bytes().len() as u32 + 1)?;
@@ -127,12 +127,7 @@ type Float = f32;
 type Bool = bool;
 type Byte = String;
 type StructKey = uuid::Uuid;
-type StructValue = Vec<Property>;
-type Object = String;
-type Name = String;
-type Str = String;
-type Text = String; // TOOD: Special text voodoo
-type Set = Vec<ValueKey>;
+
 #[derive(Debug,PartialEq)]
 pub struct MapEntry {
     key: ValueKey,
@@ -140,14 +135,12 @@ pub struct MapEntry {
 }
 impl MapEntry {
     fn read(key_type: &PropertyType, value_type: &PropertyType, reader: &mut Reader) -> Result<MapEntry> {
-        Ok(Self {
-            key: read_value_key(key_type, reader)?,
-            value: read_struct_value(value_type, reader)?,
-        })
+        let key = read_value_key(key_type, reader)?;
+        dbg!(&key);
+        let value = read_struct_value(value_type, reader)?;
+        Ok(Self { key, value })
     }
 }
-
-type Map = Vec<MapEntry>;
 
 #[derive(Debug,PartialEq)]
 pub struct MulticastInlineDelegate(Vec<MulticastInlineDelegateEntry>);
@@ -171,7 +164,122 @@ impl Readable for MulticastInlineDelegateEntry {
     }
 }
 
-// Base value to be extended
+#[derive(Debug,PartialEq)]
+pub struct LinearColor {
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+}
+impl Readable for LinearColor {
+    fn read(reader: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            r: reader.read_f32::<LittleEndian>()?,
+            g: reader.read_f32::<LittleEndian>()?,
+            b: reader.read_f32::<LittleEndian>()?,
+            a: reader.read_f32::<LittleEndian>()?,
+        })
+    }
+}
+#[derive(Debug,PartialEq)]
+pub struct Quat {
+    x: f32,
+    y: f32,
+    z: f32,
+    w: f32,
+}
+impl Readable for Quat {
+    fn read(reader: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            x: reader.read_f32::<LittleEndian>()?,
+            y: reader.read_f32::<LittleEndian>()?,
+            z: reader.read_f32::<LittleEndian>()?,
+            w: reader.read_f32::<LittleEndian>()?,
+        })
+    }
+}
+#[derive(Debug,PartialEq)]
+pub struct Rotator {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+impl Readable for Rotator {
+    fn read(reader: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            x: reader.read_f32::<LittleEndian>()?,
+            y: reader.read_f32::<LittleEndian>()?,
+            z: reader.read_f32::<LittleEndian>()?,
+        })
+    }
+}
+#[derive(Debug,PartialEq)]
+pub struct Vector {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+impl Readable for Vector {
+    fn read(reader: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            x: reader.read_f32::<LittleEndian>()?,
+            y: reader.read_f32::<LittleEndian>()?,
+            z: reader.read_f32::<LittleEndian>()?,
+        })
+    }
+}
+#[derive(Debug,PartialEq)]
+pub struct Vector2D {
+    x: f32,
+    y: f32,
+}
+impl Readable for Vector2D {
+    fn read(reader: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            x: reader.read_f32::<LittleEndian>()?,
+            y: reader.read_f32::<LittleEndian>()?,
+        })
+    }
+}
+#[derive(Debug,PartialEq)]
+pub struct Box {
+    a: Vector,
+    b: Vector,
+}
+impl Readable for Box {
+    fn read(reader: &mut Reader) -> Result<Self> {
+        let a = Vector::read(reader)?;
+        let b = Vector::read(reader)?;
+        reader.read_u8()?;
+        Ok(Self { a, b })
+    }
+}
+#[derive(Debug,PartialEq)]
+pub struct Text {
+    magic: u8,
+    value: String,
+}
+impl Readable for Text {
+    fn read(reader: &mut Reader) -> Result<Self> {
+        let magic = reader.read_u8()?;
+        match magic {
+            2 => {
+                reader.read_u64::<LittleEndian>()?;
+            }
+            0 | 8 => {
+                reader.read_u64::<LittleEndian>()?;
+                reader.read_u8()?;
+                read_string(reader)?;
+            }
+            _ => panic!("unknown magic byte for Text: {magic}")
+        };
+        Ok(Self {
+            magic,
+            value: read_string(reader)?,
+        })
+    }
+}
+
 #[derive(Debug,PartialEq)]
 pub enum ValueBase {
     Guid(uuid::Uuid),
@@ -181,50 +289,21 @@ pub enum ValueBase {
     Float(f32),
     Bool(bool),
     Byte(String),
+    Quat(Quat),
+    LinearColor(LinearColor),
+    Rotator(Rotator),
+    Vector(Vector),
+    Vector2D(Vector2D),
+    Box(Box),
+    Name(String),
+    Str(String),
+    Object(String),
 }
 
-// Full values
 #[derive(Debug,PartialEq)]
 pub enum ValueStruct {
     Base(ValueBase),
     Struct(Vec<Property>),
-}
-fn read_value_base(t: &PropertyType, reader: &mut Reader) -> Result<ValueBase> {
-    Ok(match t {
-        PropertyType::Guid => ValueBase::Guid(uuid::Uuid::read(reader)?),
-        PropertyType::DateTime => ValueBase::DateTime(reader.read_u64::<LittleEndian>()?),
-        PropertyType::IntProperty => ValueBase::Int(reader.read_i32::<LittleEndian>()?),
-        PropertyType::UInt32Property => ValueBase::UInt32(reader.read_u32::<LittleEndian>()?),
-        PropertyType::FloatProperty => ValueBase::Float(reader.read_f32::<LittleEndian>()?),
-        PropertyType::BoolProperty => ValueBase::Bool(reader.read_u8()? > 0),
-        _ => panic!("Missing ValueBase: {t:#?}")
-    })
-}
-fn read_struct_value(t: &PropertyType, reader: &mut Reader) -> Result<ValueStruct> {
-    Ok(match t {
-        PropertyType::Guid
-            | PropertyType::DateTime
-            | PropertyType::IntProperty
-            | PropertyType::UInt32Property
-            | PropertyType::FloatProperty
-            | PropertyType::BoolProperty
-            => ValueStruct::Base(read_value_base(t, reader)?),
-        _ => ValueStruct::Struct(read_properties_until_none(reader)?)
-    })
-}
-fn read_value_key(t: &PropertyType, reader: &mut Reader) -> Result<ValueKey> {
-    Ok(match t {
-        PropertyType::Guid
-            | PropertyType::DateTime
-            | PropertyType::IntProperty
-            | PropertyType::UInt32Property
-            | PropertyType::FloatProperty
-            | PropertyType::BoolProperty
-            => ValueKey::Base(read_value_base(t, reader)?),
-        PropertyType::StructProperty => ValueKey::Struct(uuid::Uuid::read(reader)?),
-        _ => panic!("Missing ValueKey: {t:#?}")
-        //_ => ValueKey::Base(read_struct_value(t, reader)?)
-    })
 }
 
 // Values used as keys for SetProperty and MapProperty
@@ -244,6 +323,7 @@ pub enum ValueArray {
     Str(Vec<String>),
     Name(Vec<String>),
     Object(Vec<String>),
+    Box(Vec<Box>),
     Struct {
         _type: String,
         name: String,
@@ -251,6 +331,44 @@ pub enum ValueArray {
         id: uuid::Uuid,
         value: Vec<ValueStruct>
     },
+}
+
+fn read_value_base(t: &PropertyType, reader: &mut Reader) -> Result<Option<ValueBase>> {
+    Ok(match t {
+        PropertyType::Guid => Some(ValueBase::Guid(uuid::Uuid::read(reader)?)),
+        PropertyType::DateTime => Some(ValueBase::DateTime(reader.read_u64::<LittleEndian>()?)),
+        PropertyType::IntProperty => Some(ValueBase::Int(reader.read_i32::<LittleEndian>()?)),
+        PropertyType::UInt32Property => Some(ValueBase::UInt32(reader.read_u32::<LittleEndian>()?)),
+        PropertyType::FloatProperty => Some(ValueBase::Float(reader.read_f32::<LittleEndian>()?)),
+        PropertyType::BoolProperty => Some(ValueBase::Bool(reader.read_u8()? > 0)),
+        PropertyType::Quat => Some(ValueBase::Quat(Quat::read(reader)?)),
+        PropertyType::LinearColor => Some(ValueBase::LinearColor(LinearColor::read(reader)?)),
+        PropertyType::Rotator => Some(ValueBase::Rotator(Rotator::read(reader)?)),
+        PropertyType::Vector => Some(ValueBase::Vector(Vector::read(reader)?)),
+        PropertyType::Vector2D => Some(ValueBase::Vector2D(Vector2D::read(reader)?)),
+        PropertyType::Box => Some(ValueBase::Box(Box::read(reader)?)),
+        PropertyType::NameProperty => Some(ValueBase::Name(read_string(reader)?)),
+        PropertyType::StrProperty => Some(ValueBase::Str(read_string(reader)?)),
+        PropertyType::ObjectProperty => Some(ValueBase::Object(read_string(reader)?)),
+        PropertyType::ByteProperty => Some(ValueBase::Byte(read_string(reader)?)),
+        _ => None
+    })
+}
+fn read_struct_value(t: &PropertyType, reader: &mut Reader) -> Result<ValueStruct> {
+    dbg!(&t);
+    Ok(if let Some(base) = read_value_base(t, reader)? {
+        ValueStruct::Base(base)
+    } else {
+        ValueStruct::Struct(read_properties_until_none(reader)?)
+    })
+}
+fn read_value_key(t: &PropertyType, reader: &mut Reader) -> Result<ValueKey> {
+    dbg!(&t);
+    Ok(if let Some(base) = read_value_base(t, reader)? {
+        ValueKey::Base(base)
+    } else {
+        ValueKey::Struct(uuid::Uuid::read(reader)?)
+    })
 }
 
 // Values with IDs present in the top level object and StructProperty
@@ -289,6 +407,10 @@ pub enum PropertyMeta {
         id: Option<uuid::Uuid>,
         value: String,
     },
+    Text {
+        id: Option<uuid::Uuid>,
+        value: Text,
+    },
     MulticastInlineDelegate {
         id: Option<uuid::Uuid>,
         value: MulticastInlineDelegate,
@@ -324,19 +446,19 @@ pub struct Property {
 
 fn read_property(reader: &mut Reader) -> Result<Option<Property>> {
     let name = read_string(reader)?;
-    println!("read_property {name}");
+    dbg!(&name);
     if name == "None" {
         Ok(None)
     } else {
         let t = read_type(reader)?;
         let _size = reader.read_u64::<LittleEndian>()?;
-        println!("{name:#?} {t:#?} {_size:#?}");
         let value = read_property_meta(t, reader)?;
         Ok(Some(Property { name, value }))
     }
 }
 
 fn read_property_meta(t: PropertyType, reader: &mut Reader) -> Result<PropertyMeta> {
+    dbg!(&t);
     match t {
         PropertyType::IntProperty => {
             Ok(PropertyMeta::Int {
@@ -364,8 +486,14 @@ fn read_property_meta(t: PropertyType, reader: &mut Reader) -> Result<PropertyMe
         },
         PropertyType::ByteProperty => {
             Ok(PropertyMeta::Byte {
-                id: read_optional_uuid(reader)?,
                 enum_type: read_string(reader)?,
+                id: read_optional_uuid(reader)?,
+                value: read_string(reader)?,
+            })
+        },
+        PropertyType::NameProperty => {
+            Ok(PropertyMeta::Str {
+                id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
             })
         },
@@ -381,6 +509,12 @@ fn read_property_meta(t: PropertyType, reader: &mut Reader) -> Result<PropertyMe
                 value: read_string(reader)?,
             })
         },
+        PropertyType::TextProperty => {
+            Ok(PropertyMeta::Text {
+                id: read_optional_uuid(reader)?,
+                value: Text::read(reader)?,
+            })
+        },
         PropertyType::MulticastInlineDelegateProperty => {
             Ok(PropertyMeta::MulticastInlineDelegate {
                 id: read_optional_uuid(reader)?,
@@ -390,7 +524,7 @@ fn read_property_meta(t: PropertyType, reader: &mut Reader) -> Result<PropertyMe
         PropertyType::SetProperty => {
             let set_type = read_type(reader)?;
             let id = read_optional_uuid(reader)?;
-            let idk = reader.read_u32::<LittleEndian>()?;
+            let _idk = reader.read_u32::<LittleEndian>()?;
             let count = reader.read_u32::<LittleEndian>()?;
             match set_type {
                 PropertyType::StructProperty => {
@@ -407,13 +541,13 @@ fn read_property_meta(t: PropertyType, reader: &mut Reader) -> Result<PropertyMe
             let key_type = read_type(reader)?;
             let value_type = read_type(reader)?;
             let id = read_optional_uuid(reader)?;
-            let idk = reader.read_u32::<LittleEndian>()?;
+            let _idk = reader.read_u32::<LittleEndian>()?;
             let count = reader.read_u32::<LittleEndian>()?;
+            dbg!(&key_type, &value_type, id, &_idk, count);
             let mut value = vec![];
             for _ in 0..count {
                 value.push(MapEntry::read(&key_type, &value_type, reader)?)
             }
-            println!("Key: {key_type:#?} Value: {value_type:#?}");
             Ok(PropertyMeta::Map {
                 key_type,
                 value_type,
@@ -425,7 +559,7 @@ fn read_property_meta(t: PropertyType, reader: &mut Reader) -> Result<PropertyMe
             let struct_type = read_type(reader)?;
             let struct_id = uuid::Uuid::read(reader)?;
             let id = read_optional_uuid(reader)?;
-            println!("{struct_type:#?} {struct_id:#?} {id:#?}");
+            dbg!(&struct_type, struct_id, id);
             let value = read_struct_value(&struct_type, reader)?;
             Ok(PropertyMeta::Struct {
                 struct_type,
@@ -438,6 +572,7 @@ fn read_property_meta(t: PropertyType, reader: &mut Reader) -> Result<PropertyMe
             let array_type = read_type(reader)?;
             let id = read_optional_uuid(reader)?;
             let count = reader.read_u32::<LittleEndian>()?;
+            dbg!(&array_type, id, count);
 
             Ok(PropertyMeta::Array {
                 id,
@@ -449,6 +584,7 @@ fn read_property_meta(t: PropertyType, reader: &mut Reader) -> Result<PropertyMe
                     PropertyType::StrProperty => ValueArray::Byte(read_array(count, reader, |r| Ok(read_string(r)?))?),
                     PropertyType::NameProperty => ValueArray::Byte(read_array(count, reader, |r| Ok(read_string(r)?))?),
                     PropertyType::ObjectProperty => ValueArray::Byte(read_array(count, reader, |r| Ok(read_string(r)?))?),
+                    PropertyType::Box => ValueArray::Box(read_array(count, reader, |r| Ok(Box::read(r)?))?),
                     PropertyType::StructProperty => {
                         let _type = read_string(reader)?;
                         let name = read_string(reader)?;
@@ -456,6 +592,7 @@ fn read_property_meta(t: PropertyType, reader: &mut Reader) -> Result<PropertyMe
                         let struct_type = read_type(reader)?;
                         let id = uuid::Uuid::read(reader)?;
                         reader.read_u8()?;
+                        dbg!(&_type, &name);
                         let mut value = vec![];
                         for _ in 0..count {
                             value.push(read_struct_value(&struct_type, reader)?);
@@ -573,8 +710,21 @@ impl Readable for Save {
     }
 }
 
-fn main() {
-    println!("Hello, world!");
+fn read_file(filename: &String) -> Vec<u8> {
+    let mut f = File::open(&filename).expect("no file found");
+    let mut buffer = vec![];
+    f.read_to_end(&mut buffer).expect("read failed");
+    buffer
+}
+
+fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let buffer = read_file(&args[1]);
+    let mut rdr = Reader::new(&buffer[..]);
+
+    let save = Save::read(&mut rdr)?;
+    println!("{save:#?}");
+    Ok(())
 }
 
 #[cfg(test)]
