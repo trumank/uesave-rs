@@ -24,6 +24,13 @@ typedef struct {
 } Vec3;
 
 typedef struct {
+    float x;
+    float y;
+    float z;
+    float w;
+} Quat;
+
+typedef struct {
     float r;
     float g;
     float b;
@@ -109,6 +116,9 @@ typedef struct(char type[], uint32 count) {
         case "Vector":
             Vec3 value[count];
             break;
+        case "Quat":
+            Quat value[count];
+            break;
         case "Rotator":
             Vec3 value[count];
             break;
@@ -125,7 +135,8 @@ typedef struct(char type[], uint32 count) {
             float value[count];
             break;
         case "ByteProperty":
-            UEString value[count]; // Enum name
+        case "EnumProperty":
+            UEString value[count];
             break;
         case "BoolProperty":
             byte value[count];
@@ -188,6 +199,10 @@ typedef struct {
                 break;
             case "ByteProperty":
                 UEString enumType; // TODO: don't fully understand enums yet
+                OptionalGUID id;
+                PropertyValue value(type.str, 1);
+                break;
+            case "EnumProperty":
                 OptionalGUID id;
                 PropertyValue value(type.str, 1);
                 break;
