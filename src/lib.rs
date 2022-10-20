@@ -33,7 +33,7 @@ fn write_optional_uuid(writer: &mut Writer, id: Option<uuid::Uuid>) -> Result<()
 
 fn read_string(reader: &mut Reader) -> Result<String> {
     let mut chars = vec![0; reader.read_u32::<LittleEndian>()? as usize];
-    reader.read(&mut chars)?;
+    reader.read_exact(&mut chars)?;
     let length = chars.iter()
         .position(|&c| c == 0)
         .unwrap_or(chars.len());
@@ -41,18 +41,14 @@ fn read_string(reader: &mut Reader) -> Result<String> {
 }
 fn write_string(writer: &mut Writer, string: &String) -> Result<()> {
     writer.write_u32::<LittleEndian>(string.as_bytes().len() as u32 + 1)?;
-    writer.write(string.as_bytes())?;
+    writer.write_all(string.as_bytes())?;
     writer.write_u8(0)?;
     Ok(())
 }
 fn read_properties_until_none(reader: &mut Reader) -> Result<Vec<Property>> {
     let mut properties = vec![];
-    loop {
-        if let Some(prop) = Property::read(reader)? {
-            properties.push(prop);
-        } else {
-            break
-        }
+    while let Some(prop) = Property::read(reader)? {
+        properties.push(prop);
     }
     Ok(properties)
 }
@@ -64,21 +60,19 @@ fn write_properties_none_terminated(writer: &mut Writer, properties: &Vec<Proper
     Ok(())
 }
 fn read_array<T>(length: u32, reader: &mut Reader, f: fn(&mut Reader) -> Result<T>) -> Result<Vec<T>> {
-    (0..length).map(|_| -> Result<T> {
-        Ok(f(reader)?)
-    }).collect()
+    (0..length).map(|_| f(reader)).collect()
 }
 
 impl Readable for uuid::Uuid {
     fn read(reader: &mut Reader) -> Result<uuid::Uuid> {
         let mut buf = [0; 16];
-        reader.read(&mut buf)?;
+        reader.read_exact(&mut buf)?;
         Ok(uuid::Uuid::from_bytes(buf))
     }
 }
 impl Writable for uuid::Uuid {
     fn write(&self, writer: &mut Writer) -> Result<()> {
-        writer.write(self.as_bytes())?;
+        writer.write_all(self.as_bytes())?;
         Ok(())
     }
 }
@@ -197,7 +191,7 @@ impl MapEntry {
 pub struct MulticastInlineDelegate(Vec<MulticastInlineDelegateEntry>);
 impl MulticastInlineDelegate {
     fn read(reader: &mut Reader) -> Result<Self> {
-        Ok(Self(read_array(reader.read_u32::<LittleEndian>()?, reader, |r| Ok(MulticastInlineDelegateEntry::read(r)?))?))
+        Ok(Self(read_array(reader.read_u32::<LittleEndian>()?, reader, MulticastInlineDelegateEntry::read)?))
     }
     fn write(&self, writer: &mut Writer) -> Result<()> {
         writer.write_u32::<LittleEndian>(self.0.len() as u32)?;
@@ -461,17 +455,17 @@ impl ValueBase {
             ValueBase::Int(v) => writer.write_i32::<LittleEndian>(*v)?,
             ValueBase::UInt32(v) => writer.write_u32::<LittleEndian>(*v)?,
             ValueBase::Float(v) => writer.write_f32::<LittleEndian>(*v)?,
-            ValueBase::Bool(v) => writer.write_u8(if *v { 1 } else { 0 })?,
+            ValueBase::Bool(v) => writer.write_u8(u8::from(*v))?,
             ValueBase::Quat(v) => v.write(writer)?,
             ValueBase::LinearColor(v) => v.write(writer)?,
             ValueBase::Rotator(v) => v.write(writer)?,
             ValueBase::Vector(v) => v.write(writer)?,
             ValueBase::Vector2D(v) => v.write(writer)?,
             ValueBase::Box(v) => v.write(writer)?,
-            ValueBase::Name(v) => write_string(writer, &v)?,
-            ValueBase::Str(v) => write_string(writer, &v)?,
-            ValueBase::Object(v) => write_string(writer, &v)?,
-            ValueBase::Byte(v) => write_string(writer, &v)?,
+            ValueBase::Name(v) => write_string(writer, v)?,
+            ValueBase::Str(v) => write_string(writer, v)?,
+            ValueBase::Object(v) => write_string(writer, v)?,
+            ValueBase::Byte(v) => write_string(writer, v)?,
         };
         Ok(())
     }
@@ -515,15 +509,15 @@ impl ValueArray {
             PropertyType::IntProperty => ValueArray::Int(read_array(count, reader, |r| Ok(r.read_i32::<LittleEndian>()?))?),
             PropertyType::UInt32Property => ValueArray::UInt32(read_array(count, reader, |r| Ok(r.read_u32::<LittleEndian>()?))?),
             PropertyType::FloatProperty => ValueArray::Float(read_array(count, reader, |r| Ok(r.read_f32::<LittleEndian>()?))?),
-            PropertyType::ByteProperty => ValueArray::Byte(read_array(count, reader, |r| Ok(read_string(r)?))?),
-            PropertyType::StrProperty => ValueArray::Byte(read_array(count, reader, |r| Ok(read_string(r)?))?),
-            PropertyType::NameProperty => ValueArray::Byte(read_array(count, reader, |r| Ok(read_string(r)?))?),
-            PropertyType::ObjectProperty => ValueArray::Byte(read_array(count, reader, |r| Ok(read_string(r)?))?),
-            PropertyType::Box => ValueArray::Box(read_array(count, reader, |r| Ok(Box::read(r)?))?),
+            PropertyType::ByteProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
+            PropertyType::StrProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
+            PropertyType::NameProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
+            PropertyType::ObjectProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
+            PropertyType::Box => ValueArray::Box(read_array(count, reader, Box::read)?),
             PropertyType::StructProperty => {
                 let _type = read_string(reader)?;
                 let name = read_string(reader)?;
-                let size = reader.read_u64::<LittleEndian>()?;
+                let _size = reader.read_u64::<LittleEndian>()?;
                 let struct_type = PropertyType::read(reader)?;
                 let id = uuid::Uuid::read(reader)?;
                 reader.read_u8()?;
@@ -592,7 +586,7 @@ impl ValueArray {
                 struct_type.write(writer)?;
                 id.write(writer)?;
                 writer.write_u8(0)?;
-                writer.write(&buf)?;
+                writer.write_all(&buf)?;
             },
         }
         Ok(())
@@ -858,7 +852,7 @@ impl PropertyMeta {
                 4
             },
             PropertyMeta::Bool { id, value } => {
-                writer.write_u8(if *value { 1 } else { 0 })?;
+                writer.write_u8(u8::from(*value))?;
                 write_optional_uuid(writer, *id)?;
                 0
             },
@@ -873,7 +867,7 @@ impl PropertyMeta {
                 let mut buf = vec![];
                 write_string(&mut buf, value)?;
                 let size = buf.len();
-                writer.write(&buf)?;
+                writer.write_all(&buf)?;
                 size
             },
             PropertyMeta::Str { id, value } => {
@@ -881,7 +875,7 @@ impl PropertyMeta {
                 let mut buf = vec![];
                 write_string(&mut buf, value)?;
                 let size = buf.len();
-                writer.write(&buf)?;
+                writer.write_all(&buf)?;
                 size
             },
             PropertyMeta::Object { id, value } => {
@@ -889,10 +883,10 @@ impl PropertyMeta {
                 let mut buf = vec![];
                 write_string(&mut buf, value)?;
                 let size = buf.len();
-                writer.write(&buf)?;
+                writer.write_all(&buf)?;
                 size
             },
-            PropertyMeta::Text { id, value } => {
+            PropertyMeta::Text { id, /* value */ .. } => {
                 write_optional_uuid(writer, *id)?;
                 panic!("TODO: write PropertyMeta::Text");
                 //write_string(writer, value)?;
@@ -902,7 +896,7 @@ impl PropertyMeta {
                 let mut buf = vec![];
                 value.write(&mut buf)?;
                 let size = buf.len();
-                writer.write(&buf)?;
+                writer.write_all(&buf)?;
                 size
             }
             PropertyMeta::Set {
@@ -918,7 +912,7 @@ impl PropertyMeta {
                 for v in value {
                     v.write(&mut buf)?;
                 }
-                let size = buf.len() as usize;
+                let size = buf.len();
                 writer.write_all(&buf)?;
                 size
             },
@@ -938,7 +932,7 @@ impl PropertyMeta {
                     v.write(&mut buf)?;
                 }
                 let size = buf.len();
-                writer.write(&buf)?;
+                writer.write_all(&buf)?;
                 size
             }
             PropertyMeta::Struct {
@@ -952,7 +946,7 @@ impl PropertyMeta {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 value.write(&mut buf)?;
-                let size = buf.len() as usize;
+                let size = buf.len();
                 writer.write_all(&buf)?;
                 size
             }
@@ -966,7 +960,7 @@ impl PropertyMeta {
                 let mut buf = vec![];
                 value.write(&mut buf)?;
                 let size = buf.len();
-                writer.write(&buf)?;
+                writer.write_all(&buf)?;
                 size
             }
         })
@@ -1019,7 +1013,7 @@ impl Readable for Header {
             engine_version_build: reader.read_u32::<LittleEndian>()?,
             engine_version: read_string(reader)?,
             custom_format_version: reader.read_u32::<LittleEndian>()?,
-            custom_format: read_array(reader.read_u32::<LittleEndian>()?, reader, |r| Ok(CustomFormatData::read(r)?))?,
+            custom_format: read_array(reader.read_u32::<LittleEndian>()?, reader, |r| CustomFormatData::read(r))?,
         })
     }
 }
@@ -1085,7 +1079,7 @@ impl Save {
 }
 
 pub fn read_file(filename: &String) -> Vec<u8> {
-    let mut f = File::open(&filename).expect("no file found");
+    let mut f = File::open(filename).expect("no file found");
     let mut buffer = vec![];
     f.read_to_end(&mut buffer).expect("read failed");
     buffer
