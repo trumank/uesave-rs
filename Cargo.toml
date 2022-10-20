@@ -5,11 +5,7 @@ edition = "2021"
 
 [dependencies]
 byteorder = "1.4.3"
-nom = "7.1.1"
 uuid = "1.0.0"
-nom-derive = "0.10.0"
-nom_locate = "4.0.0"
-nom-supreme = "0.8.0"
 anyhow = "1.0.58"
 
 [dev-dependencies]
