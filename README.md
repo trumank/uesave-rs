@@ -9,7 +9,7 @@ and write Deep Rock Galactic save files (and likely a lot more).
 There is a small binary utility to quickly convert saves to and from a plain
 text JSON format which can be used for manual save editing.
 
-## Install
+## Usage
 
 ```console
 $ cargo install --git https://github.com/trumank/uesave-rs.git
@@ -27,3 +27,4 @@ Options:
   -V, --version  Print version information
 
 ```
+![edit](https://user-images.githubusercontent.com/1144160/210157064-234da188-ad20-416f-9ea5-7d2956168a20.svg)
