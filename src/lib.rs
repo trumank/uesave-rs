@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{Cursor, Read, Write};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 
+use serde::{Serialize, Deserialize};
+
 use anyhow::Result;
 
 type Reader<'a> = Cursor<&'a[u8]>;
@@ -77,7 +79,7 @@ impl Writable for uuid::Uuid {
     }
 }
 
-#[derive(Debug,PartialEq,Eq)]
+#[derive(Debug,PartialEq,Eq,Serialize,Deserialize)]
 pub enum PropertyType {
     Guid,
     DateTime,
@@ -169,7 +171,7 @@ type Bool = bool;
 type Byte = String;
 type StructKey = uuid::Uuid;
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct MapEntry {
     pub key: ValueKey,
     pub value: ValueStruct,
@@ -187,7 +189,7 @@ impl MapEntry {
     }
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct MulticastInlineDelegate(Vec<MulticastInlineDelegateEntry>);
 impl MulticastInlineDelegate {
     fn read(reader: &mut Reader) -> Result<Self> {
@@ -202,7 +204,7 @@ impl MulticastInlineDelegate {
     }
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct MulticastInlineDelegateEntry {
     pub path: String,
     pub name: String,
@@ -221,7 +223,7 @@ impl MulticastInlineDelegateEntry {
     }
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct LinearColor {
     pub r: f32,
     pub g: f32,
@@ -245,7 +247,7 @@ impl LinearColor {
         Ok(())
     }
 }
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct Quat {
     pub x: f32,
     pub y: f32,
@@ -269,7 +271,7 @@ impl Quat {
         Ok(())
     }
 }
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct Rotator {
     pub x: f32,
     pub y: f32,
@@ -290,7 +292,7 @@ impl Rotator {
         Ok(())
     }
 }
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct Vector {
     pub x: f32,
     pub y: f32,
@@ -311,7 +313,7 @@ impl Vector {
         Ok(())
     }
 }
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct Vector2D {
     pub x: f32,
     pub y: f32,
@@ -329,7 +331,7 @@ impl Vector2D {
         Ok(())
     }
 }
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct Box {
     pub a: Vector,
     pub b: Vector,
@@ -347,7 +349,7 @@ impl Box {
         Ok(())
     }
 }
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct Text {
     pub magic: u8,
     pub value: String,
@@ -373,7 +375,7 @@ impl Readable for Text {
     }
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub enum ValueBase {
     Guid(uuid::Uuid),
     DateTime(u64),
@@ -393,21 +395,21 @@ pub enum ValueBase {
     Object(String),
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub enum ValueStruct {
     Base(ValueBase),
     Struct(Vec<Property>),
 }
 
 // Values used as keys for SetProperty and MapProperty
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub enum ValueKey {
     Base(ValueBase),
     Struct(StructKey),
 }
 
 // Array of values used by ArrayProperty
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub enum ValueArray {
     Int(Vec<Int>),
     UInt32(Vec<UInt32>),
@@ -594,61 +596,74 @@ impl ValueArray {
 }
 
 // Values with IDs present in the top level object and StructProperty
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub enum PropertyMeta {
     Int {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: Int,
     },
     UInt32 {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: UInt32,
     },
     Float {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: Float,
     },
     Bool {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: Bool,
     },
     Byte {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: Byte,
         enum_type: String,
     },
     Str {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: String,
     },
     Name {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: String,
     },
     Object {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: String,
     },
     Text {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: Text,
     },
     MulticastInlineDelegate {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: MulticastInlineDelegate,
     },
     Set {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         set_type: PropertyType,
         value: Vec<ValueKey>,
     },
     Map {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         key_type: PropertyType,
         value_type: PropertyType,
         value: Vec<MapEntry>,
     },
     Struct {
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: ValueStruct,
         struct_type: PropertyType,
@@ -656,12 +671,13 @@ pub enum PropertyMeta {
     },
     Array {
         array_type: PropertyType,
+        #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: ValueArray,
     }
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct Property {
     pub name: String,
     pub value: PropertyMeta,
@@ -968,7 +984,7 @@ impl PropertyMeta {
 }
 
 
-#[derive(Debug,PartialEq,Eq)]
+#[derive(Debug,PartialEq,Eq,Serialize,Deserialize)]
 pub struct CustomFormatData {
     pub id: uuid::Uuid,
     pub value: i32,
@@ -989,7 +1005,7 @@ impl Writable for CustomFormatData {
     }
 }
 
-#[derive(Debug,PartialEq,Eq)]
+#[derive(Debug,PartialEq,Eq,Serialize,Deserialize)]
 pub struct Header {
     pub save_game_version: u32,
     pub package_version: u32,
@@ -1036,7 +1052,7 @@ impl Writable for Header {
     }
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct Root {
     pub save_game_type: String,
     pub root: Vec<Property>,
@@ -1055,7 +1071,7 @@ impl Root {
     }
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Serialize,Deserialize)]
 pub struct Save {
     pub header: Header,
     pub root: Root,
