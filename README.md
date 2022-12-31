@@ -17,11 +17,13 @@ $ usave --help
 Usage: uesave <COMMAND>
 
 Commands:
-  to-json
-  from-json
+  to-json    Convert binary save to plain text JSON
+  from-json  Convert JSON back to binary save
+  edit       Launch $EDITOR to edit a save file as JSON in place
   help       Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help information
   -V, --version  Print version information
+
 ```
