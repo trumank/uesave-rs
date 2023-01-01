@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{Read, Write};
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use anyhow::Result;
 
 use uesave::Save;
@@ -24,7 +24,7 @@ struct Edit {
    editor: Option<String>,
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 enum Action {
    /// Convert binary save to plain text JSON
    ToJson(IO),
@@ -34,7 +34,7 @@ enum Action {
    Edit(Edit),
 }
 
-#[derive(clap::Parser, Debug)]
+#[derive(Parser, Debug)]
 #[command(author, version)]
 struct Args {
    #[command(subcommand)]
@@ -46,23 +46,23 @@ pub fn main() -> Result<()> {
 
     match args.action {
         Action::ToJson(io) => {
-            let buf = input(&*io.input)?;
+            let buf = input(&io.input)?;
             let mut cur = std::io::Cursor::new(&buf[..]);
             let save = Save::read(&mut cur)?;
-            let v = serde_json::to_value(&save)?;
-            output(&*io.output, v.to_string().as_bytes())?;
+            let v = serde_json::to_value(save)?;
+            output(&io.output, v.to_string().as_bytes())?;
         },
         Action::FromJson(io) => {
-            let buf = input(&*io.input)?;
+            let buf = input(&io.input)?;
             let save: Save = serde_json::from_slice(&buf)?;
             let mut out_buf = vec![];
             save.write(&mut out_buf)?;
-            output(&*io.output, &out_buf)?;
+            output(&io.output, &out_buf)?;
         },
         Action::Edit(edit) => {
             let editor = match edit.editor {
                 Some(editor) => editor,
-                None => std::env::var("EDITOR").unwrap_or("vim".to_string())
+                None => std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string())
             };
 
             // read and parse save file
@@ -71,7 +71,7 @@ pub fn main() -> Result<()> {
             f.read_to_end(&mut buffer)?;
             let mut cur = std::io::Cursor::new(&buffer[..]);
             let save = Save::read(&mut cur)?;
-            let value = serde_json::to_value(&save)?;
+            let value = serde_json::to_value(save)?;
 
             // create temp file and write formatted JSON to it
             let mut temp = tempfile::Builder::new()
@@ -129,7 +129,7 @@ fn output(path: &str, buf: &[u8]) -> Result<()> {
         "-" => {
             std::io::stdout()
                 .lock()
-                .write_all(&buf)?;
+                .write_all(buf)?;
         },
         p => {
             std::fs::OpenOptions::new()
@@ -137,7 +137,7 @@ fn output(path: &str, buf: &[u8]) -> Result<()> {
                 .truncate(true)
                 .write(true)
                 .open(p)?
-                .write_all(&buf)?;
+                .write_all(buf)?;
         }
     }
     Ok(())
