@@ -531,7 +531,7 @@ impl ValueArray {
                     value,
                 }
             },
-            _ => panic!("Missing ValueArray {:?}", t)
+            _ => panic!("Missing ValueArray {t:?}")
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
@@ -843,7 +843,7 @@ impl PropertyMeta {
                     value,
                 })
             },
-            _ => panic!("Missing PropertyMeta {:?}", t)
+            _ => panic!("Missing PropertyMeta {t:?}")
         }
     }
     fn write<W: Write>(&self, writer: &mut W) -> Result<usize> {
