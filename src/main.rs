@@ -1,5 +1,5 @@
-use std::fs::File;
-use std::io::{Read, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{stdin, stdout, BufRead, BufReader, BufWriter, Write, Cursor};
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
@@ -46,18 +46,12 @@ pub fn main() -> Result<()> {
 
     match args.action {
         Action::ToJson(io) => {
-            let buf = input(&io.input)?;
-            let mut cur = std::io::Cursor::new(&buf[..]);
-            let save = Save::read(&mut cur)?;
-            let v = serde_json::to_value(save)?;
-            output(&io.output, v.to_string().as_bytes())?;
+            let save = Save::read(&mut input(&io.input)?)?;
+            serde_json::to_writer(output(&io.output)?, &save)?;
         },
         Action::FromJson(io) => {
-            let buf = input(&io.input)?;
-            let save: Save = serde_json::from_slice(&buf)?;
-            let mut out_buf = vec![];
-            save.write(&mut out_buf)?;
-            output(&io.output, &out_buf)?;
+            let save: Save = serde_json::from_reader(&mut input(&io.input)?)?;
+            save.write(&mut output(&io.output)?)?;
         },
         Action::Edit(edit) => {
             let editor = match edit.editor {
@@ -66,18 +60,15 @@ pub fn main() -> Result<()> {
             };
 
             // read and parse save file
-            let mut f = File::open(&edit.path)?;
-            let mut buffer = vec![];
-            f.read_to_end(&mut buffer)?;
-            let mut cur = std::io::Cursor::new(&buffer[..]);
-            let save = Save::read(&mut cur)?;
+            let buffer = std::fs::read(&edit.path)?;
+            let save = Save::read(&mut Cursor::new(&buffer))?;
             let value = serde_json::to_value(save)?;
 
             // create temp file and write formatted JSON to it
-            let mut temp = tempfile::Builder::new()
+            let temp = tempfile::Builder::new()
                 .suffix(".json")
                 .tempfile()?;
-            temp.write_all(serde_json::to_string_pretty(&value)?.as_bytes())?;
+            serde_json::to_writer_pretty(BufWriter::new(&temp), &value)?;
 
             // launch editor
             std::process::Command::new(editor)
@@ -87,14 +78,14 @@ pub fn main() -> Result<()> {
                 .wait()?;
 
             // rebuild save if modified
-            let modified_save: Save = serde_json::from_reader(std::io::BufReader::new(temp.reopen()?))?;
+            let modified_save: Save = serde_json::from_reader(BufReader::new(temp.reopen()?))?;
             let mut out_buffer = vec![];
             modified_save.write(&mut out_buffer)?;
             if buffer == out_buffer {
                 println!("File unchanged, doing nothing.");
             } else {
                 println!("File modified, writing new save.");
-                std::fs::OpenOptions::new()
+                OpenOptions::new()
                     .create(true)
                     .truncate(true)
                     .write(true)
@@ -106,39 +97,28 @@ pub fn main() -> Result<()> {
     Ok(())
 }
 
-fn input(path: &str) -> Result<Vec<u8>> {
+fn input<'a>(path: &str) -> Result<Box<dyn BufRead + 'a>> {
     Ok(match path {
         "-" => {
-            let mut input =  Vec::new();
-            let stdin = std::io::stdin();
-            let mut handle = stdin.lock();
-            handle.read_to_end(&mut input)?;
-            input
+            Box::new(BufReader::new(stdin().lock()))
         },
         p => {
-            let mut f = File::open(p)?;
-            let mut buffer = vec![];
-            f.read_to_end(&mut buffer)?;
-            buffer
+            Box::new(BufReader::new(File::open(p)?))
         },
     })
 }
 
-fn output(path: &str, buf: &[u8]) -> Result<()> {
-    match path {
+fn output<'a>(path: &str) -> Result<Box<dyn Write + 'a>> {
+    Ok(match path {
         "-" => {
-            std::io::stdout()
-                .lock()
-                .write_all(buf)?;
+            Box::new(BufWriter::new(stdout().lock()))
         },
         p => {
-            std::fs::OpenOptions::new()
+            Box::new(BufWriter::new(OpenOptions::new()
                 .create(true)
                 .truncate(true)
                 .write(true)
-                .open(p)?
-                .write_all(buf)?;
+                .open(p)?))
         }
-    }
-    Ok(())
+    })
 }
