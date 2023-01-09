@@ -1,14 +1,11 @@
-use std::io::Cursor;
+use std::fs::File;
 
 use anyhow::Result;
 
 use uesave::{Save, PropertyMeta, ValueArray, ValueStruct, ValueBase};
 
 fn main() -> Result<()> {
-    let buffer = uesave::read_file(&"PropPack.sav".to_owned());
-    let mut rdr = Cursor::new(&buffer[..]);
-
-    let save = Save::read(&mut rdr)?;
+    let save = Save::read(&mut File::open("examples/space-rig-decorator/PropPack.sav")?)?;
     let props = &save.root.root[0].value;
     if let PropertyMeta::Array{value, ..} = props {
         if let ValueArray::Struct{value, ..} = value {
