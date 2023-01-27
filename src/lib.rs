@@ -1,6 +1,6 @@
 mod error;
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io::{Read, Write};
 
 use serde::{Deserialize, Serialize};
@@ -34,13 +34,13 @@ fn write_optional_uuid<W: Write>(writer: &mut W, id: Option<uuid::Uuid>) -> TRes
 }
 
 fn read_string<R: Read>(reader: &mut R) -> TResult<String> {
-    let mut chars = vec![0; reader.read_u32::<LittleEndian>()? as usize];
+    let mut chars = vec![0; reader.read_u32::<LE>()? as usize];
     reader.read_exact(&mut chars)?;
     let length = chars.iter().position(|&c| c == 0).unwrap_or(chars.len());
     Ok(String::from_utf8_lossy(&chars[..length]).into_owned())
 }
 fn write_string<W: Write>(writer: &mut W, string: &String) -> TResult<()> {
-    writer.write_u32::<LittleEndian>(string.as_bytes().len() as u32 + 1)?;
+    writer.write_u32::<LE>(string.as_bytes().len() as u32 + 1)?;
     writer.write_all(string.as_bytes())?;
     writer.write_u8(0)?;
     Ok(())
@@ -205,13 +205,13 @@ pub struct MulticastInlineDelegate(Vec<MulticastInlineDelegateEntry>);
 impl MulticastInlineDelegate {
     fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self(read_array(
-            reader.read_u32::<LittleEndian>()?,
+            reader.read_u32::<LE>()?,
             reader,
             MulticastInlineDelegateEntry::read,
         )?))
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        writer.write_u32::<LittleEndian>(self.0.len() as u32)?;
+        writer.write_u32::<LE>(self.0.len() as u32)?;
         for entry in &self.0 {
             entry.write(writer)?;
         }
@@ -248,17 +248,17 @@ pub struct LinearColor {
 impl LinearColor {
     fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
-            r: reader.read_f32::<LittleEndian>()?,
-            g: reader.read_f32::<LittleEndian>()?,
-            b: reader.read_f32::<LittleEndian>()?,
-            a: reader.read_f32::<LittleEndian>()?,
+            r: reader.read_f32::<LE>()?,
+            g: reader.read_f32::<LE>()?,
+            b: reader.read_f32::<LE>()?,
+            a: reader.read_f32::<LE>()?,
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        writer.write_f32::<LittleEndian>(self.r)?;
-        writer.write_f32::<LittleEndian>(self.g)?;
-        writer.write_f32::<LittleEndian>(self.b)?;
-        writer.write_f32::<LittleEndian>(self.a)?;
+        writer.write_f32::<LE>(self.r)?;
+        writer.write_f32::<LE>(self.g)?;
+        writer.write_f32::<LE>(self.b)?;
+        writer.write_f32::<LE>(self.a)?;
         Ok(())
     }
 }
@@ -272,17 +272,17 @@ pub struct Quat {
 impl Quat {
     fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
-            x: reader.read_f32::<LittleEndian>()?,
-            y: reader.read_f32::<LittleEndian>()?,
-            z: reader.read_f32::<LittleEndian>()?,
-            w: reader.read_f32::<LittleEndian>()?,
+            x: reader.read_f32::<LE>()?,
+            y: reader.read_f32::<LE>()?,
+            z: reader.read_f32::<LE>()?,
+            w: reader.read_f32::<LE>()?,
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        writer.write_f32::<LittleEndian>(self.x)?;
-        writer.write_f32::<LittleEndian>(self.y)?;
-        writer.write_f32::<LittleEndian>(self.z)?;
-        writer.write_f32::<LittleEndian>(self.w)?;
+        writer.write_f32::<LE>(self.x)?;
+        writer.write_f32::<LE>(self.y)?;
+        writer.write_f32::<LE>(self.z)?;
+        writer.write_f32::<LE>(self.w)?;
         Ok(())
     }
 }
@@ -295,15 +295,15 @@ pub struct Rotator {
 impl Rotator {
     fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
-            x: reader.read_f32::<LittleEndian>()?,
-            y: reader.read_f32::<LittleEndian>()?,
-            z: reader.read_f32::<LittleEndian>()?,
+            x: reader.read_f32::<LE>()?,
+            y: reader.read_f32::<LE>()?,
+            z: reader.read_f32::<LE>()?,
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        writer.write_f32::<LittleEndian>(self.x)?;
-        writer.write_f32::<LittleEndian>(self.y)?;
-        writer.write_f32::<LittleEndian>(self.z)?;
+        writer.write_f32::<LE>(self.x)?;
+        writer.write_f32::<LE>(self.y)?;
+        writer.write_f32::<LE>(self.z)?;
         Ok(())
     }
 }
@@ -316,15 +316,15 @@ pub struct Vector {
 impl Vector {
     fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
-            x: reader.read_f32::<LittleEndian>()?,
-            y: reader.read_f32::<LittleEndian>()?,
-            z: reader.read_f32::<LittleEndian>()?,
+            x: reader.read_f32::<LE>()?,
+            y: reader.read_f32::<LE>()?,
+            z: reader.read_f32::<LE>()?,
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        writer.write_f32::<LittleEndian>(self.x)?;
-        writer.write_f32::<LittleEndian>(self.y)?;
-        writer.write_f32::<LittleEndian>(self.z)?;
+        writer.write_f32::<LE>(self.x)?;
+        writer.write_f32::<LE>(self.y)?;
+        writer.write_f32::<LE>(self.z)?;
         Ok(())
     }
 }
@@ -336,13 +336,13 @@ pub struct Vector2D {
 impl Vector2D {
     fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
-            x: reader.read_f32::<LittleEndian>()?,
-            y: reader.read_f32::<LittleEndian>()?,
+            x: reader.read_f32::<LE>()?,
+            y: reader.read_f32::<LE>()?,
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        writer.write_f32::<LittleEndian>(self.x)?;
-        writer.write_f32::<LittleEndian>(self.y)?;
+        writer.write_f32::<LE>(self.x)?;
+        writer.write_f32::<LE>(self.y)?;
         Ok(())
     }
 }
@@ -374,10 +374,10 @@ impl<R: Read> Readable<R> for Text {
         let magic = reader.read_u8()?;
         match magic {
             2 => {
-                reader.read_u64::<LittleEndian>()?;
+                reader.read_u64::<LE>()?;
             }
             0 | 8 => {
-                reader.read_u64::<LittleEndian>()?;
+                reader.read_u64::<LE>()?;
                 reader.read_u8()?;
                 read_string(reader)?;
             }
@@ -447,14 +447,10 @@ impl ValueBase {
     fn read<R: Read>(t: &PropertyType, reader: &mut R) -> TResult<Option<ValueBase>> {
         Ok(match t {
             PropertyType::Guid => Some(ValueBase::Guid(uuid::Uuid::read(reader)?)),
-            PropertyType::DateTime => Some(ValueBase::DateTime(reader.read_u64::<LittleEndian>()?)),
-            PropertyType::IntProperty => Some(ValueBase::Int(reader.read_i32::<LittleEndian>()?)),
-            PropertyType::UInt32Property => {
-                Some(ValueBase::UInt32(reader.read_u32::<LittleEndian>()?))
-            }
-            PropertyType::FloatProperty => {
-                Some(ValueBase::Float(reader.read_f32::<LittleEndian>()?))
-            }
+            PropertyType::DateTime => Some(ValueBase::DateTime(reader.read_u64::<LE>()?)),
+            PropertyType::IntProperty => Some(ValueBase::Int(reader.read_i32::<LE>()?)),
+            PropertyType::UInt32Property => Some(ValueBase::UInt32(reader.read_u32::<LE>()?)),
+            PropertyType::FloatProperty => Some(ValueBase::Float(reader.read_f32::<LE>()?)),
             PropertyType::BoolProperty => Some(ValueBase::Bool(reader.read_u8()? > 0)),
             PropertyType::Quat => Some(ValueBase::Quat(Quat::read(reader)?)),
             PropertyType::LinearColor => Some(ValueBase::LinearColor(LinearColor::read(reader)?)),
@@ -472,10 +468,10 @@ impl ValueBase {
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         match &self {
             ValueBase::Guid(v) => v.write(writer)?,
-            ValueBase::DateTime(v) => writer.write_u64::<LittleEndian>(*v)?,
-            ValueBase::Int(v) => writer.write_i32::<LittleEndian>(*v)?,
-            ValueBase::UInt32(v) => writer.write_u32::<LittleEndian>(*v)?,
-            ValueBase::Float(v) => writer.write_f32::<LittleEndian>(*v)?,
+            ValueBase::DateTime(v) => writer.write_u64::<LE>(*v)?,
+            ValueBase::Int(v) => writer.write_i32::<LE>(*v)?,
+            ValueBase::UInt32(v) => writer.write_u32::<LE>(*v)?,
+            ValueBase::Float(v) => writer.write_f32::<LE>(*v)?,
             ValueBase::Bool(v) => writer.write_u8(u8::from(*v))?,
             ValueBase::Quat(v) => v.write(writer)?,
             ValueBase::LinearColor(v) => v.write(writer)?,
@@ -525,17 +521,17 @@ impl ValueKey {
 }
 impl ValueArray {
     fn read<R: Read>(t: &PropertyType, reader: &mut R) -> TResult<ValueArray> {
-        let count = reader.read_u32::<LittleEndian>()?;
+        let count = reader.read_u32::<LE>()?;
         Ok(match t {
-            PropertyType::IntProperty => ValueArray::Int(read_array(count, reader, |r| {
-                Ok(r.read_i32::<LittleEndian>()?)
-            })?),
-            PropertyType::UInt32Property => ValueArray::UInt32(read_array(count, reader, |r| {
-                Ok(r.read_u32::<LittleEndian>()?)
-            })?),
-            PropertyType::FloatProperty => ValueArray::Float(read_array(count, reader, |r| {
-                Ok(r.read_f32::<LittleEndian>()?)
-            })?),
+            PropertyType::IntProperty => {
+                ValueArray::Int(read_array(count, reader, |r| Ok(r.read_i32::<LE>()?))?)
+            }
+            PropertyType::UInt32Property => {
+                ValueArray::UInt32(read_array(count, reader, |r| Ok(r.read_u32::<LE>()?))?)
+            }
+            PropertyType::FloatProperty => {
+                ValueArray::Float(read_array(count, reader, |r| Ok(r.read_f32::<LE>()?))?)
+            }
             PropertyType::ByteProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
             PropertyType::StrProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
             PropertyType::NameProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
@@ -546,7 +542,7 @@ impl ValueArray {
             PropertyType::StructProperty => {
                 let _type = read_string(reader)?;
                 let name = read_string(reader)?;
-                let _size = reader.read_u64::<LittleEndian>()?;
+                let _size = reader.read_u64::<LE>()?;
                 let struct_type = PropertyType::read(reader)?;
                 let id = uuid::Uuid::read(reader)?;
                 reader.read_u8()?;
@@ -568,34 +564,34 @@ impl ValueArray {
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         match &self {
             ValueArray::Int(v) => {
-                writer.write_u32::<LittleEndian>(v.len() as u32)?;
+                writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
-                    writer.write_i32::<LittleEndian>(*i)?;
+                    writer.write_i32::<LE>(*i)?;
                 }
             }
             ValueArray::UInt32(v) => {
-                writer.write_u32::<LittleEndian>(v.len() as u32)?;
+                writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
-                    writer.write_u32::<LittleEndian>(*i)?;
+                    writer.write_u32::<LE>(*i)?;
                 }
             }
             ValueArray::Float(v) => {
-                writer.write_u32::<LittleEndian>(v.len() as u32)?;
+                writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
-                    writer.write_f32::<LittleEndian>(*i)?;
+                    writer.write_f32::<LE>(*i)?;
                 }
             }
             ValueArray::Byte(v)
             | ValueArray::Str(v)
             | ValueArray::Object(v)
             | ValueArray::Name(v) => {
-                writer.write_u32::<LittleEndian>(v.len() as u32)?;
+                writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
                     write_string(writer, i)?;
                 }
             }
             ValueArray::Box(v) => {
-                writer.write_u32::<LittleEndian>(v.len() as u32)?;
+                writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
                     i.write(writer)?;
                 }
@@ -607,14 +603,14 @@ impl ValueArray {
                 id,
                 value,
             } => {
-                writer.write_u32::<LittleEndian>(value.len() as u32)?;
+                writer.write_u32::<LE>(value.len() as u32)?;
                 write_string(writer, _type)?;
                 write_string(writer, name)?;
                 let mut buf = vec![];
                 for v in value {
                     v.write(&mut buf)?;
                 }
-                writer.write_u64::<LittleEndian>(buf.len() as u64)?;
+                writer.write_u64::<LE>(buf.len() as u64)?;
                 struct_type.write(writer)?;
                 id.write(writer)?;
                 writer.write_u8(0)?;
@@ -720,7 +716,7 @@ impl Property {
             Ok(None)
         } else {
             let t = PropertyType::read(reader)?;
-            let _size = reader.read_u64::<LittleEndian>()?;
+            let _size = reader.read_u64::<LE>()?;
             let value = PropertyMeta::read(t, reader)?;
             Ok(Some(Property { name, value }))
         }
@@ -732,8 +728,8 @@ impl Property {
         let mut buf = vec![];
         let size = self.value.write(&mut buf)?;
 
-        //writer.write_u64::<LittleEndian>(buf.len() as u64)?;
-        writer.write_u64::<LittleEndian>(size as u64)?;
+        //writer.write_u64::<LE>(buf.len() as u64)?;
+        writer.write_u64::<LE>(size as u64)?;
         writer.write_all(&buf[..])?;
         Ok(())
     }
@@ -764,15 +760,15 @@ impl PropertyMeta {
         match t {
             PropertyType::IntProperty => Ok(PropertyMeta::Int {
                 id: read_optional_uuid(reader)?,
-                value: reader.read_i32::<LittleEndian>()?,
+                value: reader.read_i32::<LE>()?,
             }),
             PropertyType::UInt32Property => Ok(PropertyMeta::UInt32 {
                 id: read_optional_uuid(reader)?,
-                value: reader.read_u32::<LittleEndian>()?,
+                value: reader.read_u32::<LE>()?,
             }),
             PropertyType::FloatProperty => Ok(PropertyMeta::Float {
                 id: read_optional_uuid(reader)?,
-                value: reader.read_f32::<LittleEndian>()?,
+                value: reader.read_f32::<LE>()?,
             }),
             PropertyType::BoolProperty => Ok(PropertyMeta::Bool {
                 value: reader.read_u8()? > 0,
@@ -808,8 +804,8 @@ impl PropertyMeta {
             PropertyType::SetProperty => {
                 let set_type = PropertyType::read(reader)?;
                 let id = read_optional_uuid(reader)?;
-                reader.read_u32::<LittleEndian>()?;
-                let count = reader.read_u32::<LittleEndian>()?;
+                reader.read_u32::<LE>()?;
+                let count = reader.read_u32::<LE>()?;
                 match set_type {
                     PropertyType::StructProperty => Ok(PropertyMeta::Set {
                         id,
@@ -825,8 +821,8 @@ impl PropertyMeta {
                 let key_type = PropertyType::read(reader)?;
                 let value_type = PropertyType::read(reader)?;
                 let id = read_optional_uuid(reader)?;
-                reader.read_u32::<LittleEndian>()?;
-                let count = reader.read_u32::<LittleEndian>()?;
+                reader.read_u32::<LE>()?;
+                let count = reader.read_u32::<LE>()?;
                 let mut value = vec![];
                 for _ in 0..count {
                     value.push(MapEntry::read(&key_type, &value_type, reader)?)
@@ -868,17 +864,17 @@ impl PropertyMeta {
         Ok(match self {
             PropertyMeta::Int { id, value } => {
                 write_optional_uuid(writer, *id)?;
-                writer.write_i32::<LittleEndian>(*value)?;
+                writer.write_i32::<LE>(*value)?;
                 4
             }
             PropertyMeta::UInt32 { id, value } => {
                 write_optional_uuid(writer, *id)?;
-                writer.write_u32::<LittleEndian>(*value)?;
+                writer.write_u32::<LE>(*value)?;
                 4
             }
             PropertyMeta::Float { id, value } => {
                 write_optional_uuid(writer, *id)?;
-                writer.write_f32::<LittleEndian>(*value)?;
+                writer.write_f32::<LE>(*value)?;
                 4
             }
             PropertyMeta::Bool { id, value } => {
@@ -941,8 +937,8 @@ impl PropertyMeta {
                 set_type.write(writer)?;
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
-                buf.write_u32::<LittleEndian>(0)?;
-                buf.write_u32::<LittleEndian>(value.len() as u32)?;
+                buf.write_u32::<LE>(0)?;
+                buf.write_u32::<LE>(value.len() as u32)?;
                 for v in value {
                     v.write(&mut buf)?;
                 }
@@ -960,8 +956,8 @@ impl PropertyMeta {
                 value_type.write(writer)?;
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
-                buf.write_u32::<LittleEndian>(0)?;
-                buf.write_u32::<LittleEndian>(value.len() as u32)?;
+                buf.write_u32::<LE>(0)?;
+                buf.write_u32::<LE>(value.len() as u32)?;
                 for v in value {
                     v.write(&mut buf)?;
                 }
@@ -1010,14 +1006,14 @@ impl<R: Read> Readable<R> for CustomFormatData {
     fn read(reader: &mut R) -> TResult<Self> {
         Ok(CustomFormatData {
             id: uuid::Uuid::read(reader)?,
-            value: reader.read_i32::<LittleEndian>()?,
+            value: reader.read_i32::<LE>()?,
         })
     }
 }
 impl<W: Write> Writable<W> for CustomFormatData {
     fn write(&self, writer: &mut W) -> TResult<()> {
         self.id.write(writer)?;
-        writer.write_i32::<LittleEndian>(self.value)?;
+        writer.write_i32::<LE>(self.value)?;
         Ok(())
     }
 }
@@ -1036,19 +1032,19 @@ pub struct Header {
 }
 impl<R: Read> Readable<R> for Header {
     fn read(reader: &mut R) -> TResult<Self> {
-        if reader.read_u32::<LittleEndian>()? != u32::from_le_bytes(*b"GVAS") {
+        if reader.read_u32::<LE>()? != u32::from_le_bytes(*b"GVAS") {
             return Err(crate::error::Error::BadMagic());
         }
         Ok(Header {
-            save_game_version: reader.read_u32::<LittleEndian>()?,
-            package_version: reader.read_u32::<LittleEndian>()?,
-            engine_version_major: reader.read_u16::<LittleEndian>()?,
-            engine_version_minor: reader.read_u16::<LittleEndian>()?,
-            engine_version_patch: reader.read_u16::<LittleEndian>()?,
-            engine_version_build: reader.read_u32::<LittleEndian>()?,
+            save_game_version: reader.read_u32::<LE>()?,
+            package_version: reader.read_u32::<LE>()?,
+            engine_version_major: reader.read_u16::<LE>()?,
+            engine_version_minor: reader.read_u16::<LE>()?,
+            engine_version_patch: reader.read_u16::<LE>()?,
+            engine_version_build: reader.read_u32::<LE>()?,
             engine_version: read_string(reader)?,
-            custom_format_version: reader.read_u32::<LittleEndian>()?,
-            custom_format: read_array(reader.read_u32::<LittleEndian>()?, reader, |r| {
+            custom_format_version: reader.read_u32::<LE>()?,
+            custom_format: read_array(reader.read_u32::<LE>()?, reader, |r| {
                 CustomFormatData::read(r)
             })?,
         })
@@ -1056,16 +1052,16 @@ impl<R: Read> Readable<R> for Header {
 }
 impl<W: Write> Writable<W> for Header {
     fn write(&self, writer: &mut W) -> TResult<()> {
-        writer.write_u32::<LittleEndian>(u32::from_le_bytes(*b"GVAS"))?;
-        writer.write_u32::<LittleEndian>(self.save_game_version)?;
-        writer.write_u32::<LittleEndian>(self.package_version)?;
-        writer.write_u16::<LittleEndian>(self.engine_version_major)?;
-        writer.write_u16::<LittleEndian>(self.engine_version_minor)?;
-        writer.write_u16::<LittleEndian>(self.engine_version_patch)?;
-        writer.write_u32::<LittleEndian>(self.engine_version_build)?;
+        writer.write_u32::<LE>(u32::from_le_bytes(*b"GVAS"))?;
+        writer.write_u32::<LE>(self.save_game_version)?;
+        writer.write_u32::<LE>(self.package_version)?;
+        writer.write_u16::<LE>(self.engine_version_major)?;
+        writer.write_u16::<LE>(self.engine_version_minor)?;
+        writer.write_u16::<LE>(self.engine_version_patch)?;
+        writer.write_u32::<LE>(self.engine_version_build)?;
         write_string(writer, &self.engine_version)?;
-        writer.write_u32::<LittleEndian>(self.custom_format_version)?;
-        writer.write_u32::<LittleEndian>(self.custom_format.len() as u32)?;
+        writer.write_u32::<LE>(self.custom_format_version)?;
+        writer.write_u32::<LE>(self.custom_format.len() as u32)?;
         for cf in &self.custom_format {
             cf.write(writer)?;
         }
@@ -1106,7 +1102,7 @@ impl Save {
     pub fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         self.header.write(writer)?;
         self.root.write(writer)?;
-        writer.write_u32::<LittleEndian>(0)?;
+        writer.write_u32::<LE>(0)?;
         Ok(())
     }
 }
