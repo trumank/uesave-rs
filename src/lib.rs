@@ -39,7 +39,7 @@ fn read_string<R: Read>(reader: &mut R) -> TResult<String> {
     let length = chars.iter().position(|&c| c == 0).unwrap_or(chars.len());
     Ok(String::from_utf8_lossy(&chars[..length]).into_owned())
 }
-fn write_string<W: Write>(writer: &mut W, string: &String) -> TResult<()> {
+fn write_string<W: Write>(writer: &mut W, string: &str) -> TResult<()> {
     writer.write_u32::<LE>(string.as_bytes().len() as u32 + 1)?;
     writer.write_all(string.as_bytes())?;
     writer.write_u8(0)?;
@@ -59,7 +59,7 @@ fn write_properties_none_terminated<W: Write>(
     for p in properties {
         p.write(writer)?;
     }
-    write_string(writer, &"None".to_owned())?;
+    write_string(writer, "None")?;
     Ok(())
 }
 fn read_array<T, R: Read>(
@@ -140,33 +140,34 @@ impl PropertyType {
         }
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        match &self {
-            PropertyType::Guid => write_string(writer, &"Guid".to_string())?,
-            PropertyType::DateTime => write_string(writer, &"DateTime".to_string())?,
-            PropertyType::Box => write_string(writer, &"Box".to_string())?,
-            PropertyType::Vector2D => write_string(writer, &"Vector2D".to_string())?,
-            PropertyType::Vector => write_string(writer, &"Vector".to_string())?,
-            PropertyType::Quat => write_string(writer, &"Quat".to_string())?,
-            PropertyType::Rotator => write_string(writer, &"Rotator".to_string())?,
-            PropertyType::LinearColor => write_string(writer, &"LinearColor".to_string())?,
-            PropertyType::IntProperty => write_string(writer, &"IntProperty".to_string())?,
-            PropertyType::UInt32Property => write_string(writer, &"UInt32Property".to_string())?,
-            PropertyType::FloatProperty => write_string(writer, &"FloatProperty".to_string())?,
-            PropertyType::BoolProperty => write_string(writer, &"BoolProperty".to_string())?,
-            PropertyType::ByteProperty => write_string(writer, &"ByteProperty".to_string())?,
-            PropertyType::StructProperty => write_string(writer, &"StructProperty".to_string())?,
-            PropertyType::ArrayProperty => write_string(writer, &"ArrayProperty".to_string())?,
-            PropertyType::ObjectProperty => write_string(writer, &"ObjectProperty".to_string())?,
-            PropertyType::StrProperty => write_string(writer, &"StrProperty".to_string())?,
-            PropertyType::NameProperty => write_string(writer, &"NameProperty".to_string())?,
-            PropertyType::TextProperty => write_string(writer, &"TextProperty".to_string())?,
-            PropertyType::MulticastInlineDelegateProperty => {
-                write_string(writer, &"MulticastInlineDelegateProperty".to_string())?
-            }
-            PropertyType::SetProperty => write_string(writer, &"SetProperty".to_string())?,
-            PropertyType::MapProperty => write_string(writer, &"MapProperty".to_string())?,
-            PropertyType::Other(t) => write_string(writer, t)?,
-        }
+        write_string(
+            writer,
+            match &self {
+                PropertyType::Guid => "Guid",
+                PropertyType::DateTime => "DateTime",
+                PropertyType::Box => "Box",
+                PropertyType::Vector2D => "Vector2D",
+                PropertyType::Vector => "Vector",
+                PropertyType::Quat => "Quat",
+                PropertyType::Rotator => "Rotator",
+                PropertyType::LinearColor => "LinearColor",
+                PropertyType::IntProperty => "IntProperty",
+                PropertyType::UInt32Property => "UInt32Property",
+                PropertyType::FloatProperty => "FloatProperty",
+                PropertyType::BoolProperty => "BoolProperty",
+                PropertyType::ByteProperty => "ByteProperty",
+                PropertyType::StructProperty => "StructProperty",
+                PropertyType::ArrayProperty => "ArrayProperty",
+                PropertyType::ObjectProperty => "ObjectProperty",
+                PropertyType::StrProperty => "StrProperty",
+                PropertyType::NameProperty => "NameProperty",
+                PropertyType::TextProperty => "TextProperty",
+                PropertyType::MulticastInlineDelegateProperty => "MulticastInlineDelegateProperty",
+                PropertyType::SetProperty => "SetProperty",
+                PropertyType::MapProperty => "MapProperty",
+                PropertyType::Other(t) => t,
+            },
+        )?;
         Ok(())
     }
 }
