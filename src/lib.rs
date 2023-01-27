@@ -1,27 +1,29 @@
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+mod error;
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 
 use serde::{Deserialize, Serialize};
 
-use anyhow::Result;
+type TResult<T> = Result<T, crate::error::Error>;
 
 trait Readable<R> {
-    fn read(reader: &mut R) -> Result<Self>
+    fn read(reader: &mut R) -> TResult<Self>
     where
         Self: Sized;
 }
 trait Writable<W> {
-    fn write(&self, writer: &mut W) -> Result<()>;
+    fn write(&self, writer: &mut W) -> TResult<()>;
 }
 
-fn read_optional_uuid<R: Read>(reader: &mut R) -> Result<Option<uuid::Uuid>> {
+fn read_optional_uuid<R: Read>(reader: &mut R) -> TResult<Option<uuid::Uuid>> {
     Ok(if reader.read_u8()? > 0 {
         Some(uuid::Uuid::read(reader)?)
     } else {
         None
     })
 }
-fn write_optional_uuid<W: Write>(writer: &mut W, id: Option<uuid::Uuid>) -> Result<()> {
+fn write_optional_uuid<W: Write>(writer: &mut W, id: Option<uuid::Uuid>) -> TResult<()> {
     if let Some(id) = id {
         writer.write_u8(1)?;
         id.write(writer)?;
@@ -31,19 +33,19 @@ fn write_optional_uuid<W: Write>(writer: &mut W, id: Option<uuid::Uuid>) -> Resu
     Ok(())
 }
 
-fn read_string<R: Read>(reader: &mut R) -> Result<String> {
+fn read_string<R: Read>(reader: &mut R) -> TResult<String> {
     let mut chars = vec![0; reader.read_u32::<LittleEndian>()? as usize];
     reader.read_exact(&mut chars)?;
     let length = chars.iter().position(|&c| c == 0).unwrap_or(chars.len());
     Ok(String::from_utf8_lossy(&chars[..length]).into_owned())
 }
-fn write_string<W: Write>(writer: &mut W, string: &String) -> Result<()> {
+fn write_string<W: Write>(writer: &mut W, string: &String) -> TResult<()> {
     writer.write_u32::<LittleEndian>(string.as_bytes().len() as u32 + 1)?;
     writer.write_all(string.as_bytes())?;
     writer.write_u8(0)?;
     Ok(())
 }
-fn read_properties_until_none<R: Read>(reader: &mut R) -> Result<Vec<Property>> {
+fn read_properties_until_none<R: Read>(reader: &mut R) -> TResult<Vec<Property>> {
     let mut properties = vec![];
     while let Some(prop) = Property::read(reader)? {
         properties.push(prop);
@@ -53,7 +55,7 @@ fn read_properties_until_none<R: Read>(reader: &mut R) -> Result<Vec<Property>> 
 fn write_properties_none_terminated<W: Write>(
     writer: &mut W,
     properties: &Vec<Property>,
-) -> Result<()> {
+) -> TResult<()> {
     for p in properties {
         p.write(writer)?;
     }
@@ -63,20 +65,20 @@ fn write_properties_none_terminated<W: Write>(
 fn read_array<T, R: Read>(
     length: u32,
     reader: &mut R,
-    f: fn(&mut R) -> Result<T>,
-) -> Result<Vec<T>> {
+    f: fn(&mut R) -> TResult<T>,
+) -> TResult<Vec<T>> {
     (0..length).map(|_| f(reader)).collect()
 }
 
 impl<R: Read> Readable<R> for uuid::Uuid {
-    fn read(reader: &mut R) -> Result<uuid::Uuid> {
+    fn read(reader: &mut R) -> TResult<uuid::Uuid> {
         let mut buf = [0; 16];
         reader.read_exact(&mut buf)?;
         Ok(uuid::Uuid::from_bytes(buf))
     }
 }
 impl<W: Write> Writable<W> for uuid::Uuid {
-    fn write(&self, writer: &mut W) -> Result<()> {
+    fn write(&self, writer: &mut W) -> TResult<()> {
         writer.write_all(self.as_bytes())?;
         Ok(())
     }
@@ -109,7 +111,7 @@ pub enum PropertyType {
     Other(String),
 }
 impl PropertyType {
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         let t = read_string(reader)?;
         match t.as_str() {
             "Guid" => Ok(PropertyType::Guid),
@@ -137,7 +139,7 @@ impl PropertyType {
             _ => Ok(PropertyType::Other(t)),
         }
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         match &self {
             PropertyType::Guid => write_string(writer, &"Guid".to_string())?,
             PropertyType::DateTime => write_string(writer, &"DateTime".to_string())?,
@@ -186,12 +188,12 @@ impl MapEntry {
         key_type: &PropertyType,
         value_type: &PropertyType,
         reader: &mut R,
-    ) -> Result<MapEntry> {
+    ) -> TResult<MapEntry> {
         let key = ValueKey::read(key_type, reader)?;
         let value = ValueStruct::read(value_type, reader)?;
         Ok(Self { key, value })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         self.key.write(writer)?;
         self.value.write(writer)?;
         Ok(())
@@ -201,14 +203,14 @@ impl MapEntry {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct MulticastInlineDelegate(Vec<MulticastInlineDelegateEntry>);
 impl MulticastInlineDelegate {
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self(read_array(
             reader.read_u32::<LittleEndian>()?,
             reader,
             MulticastInlineDelegateEntry::read,
         )?))
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         writer.write_u32::<LittleEndian>(self.0.len() as u32)?;
         for entry in &self.0 {
             entry.write(writer)?;
@@ -223,13 +225,13 @@ pub struct MulticastInlineDelegateEntry {
     pub name: String,
 }
 impl MulticastInlineDelegateEntry {
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             path: read_string(reader)?,
             name: read_string(reader)?,
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         write_string(writer, &self.path)?;
         write_string(writer, &self.name)?;
         Ok(())
@@ -244,7 +246,7 @@ pub struct LinearColor {
     pub a: f32,
 }
 impl LinearColor {
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             r: reader.read_f32::<LittleEndian>()?,
             g: reader.read_f32::<LittleEndian>()?,
@@ -252,7 +254,7 @@ impl LinearColor {
             a: reader.read_f32::<LittleEndian>()?,
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         writer.write_f32::<LittleEndian>(self.r)?;
         writer.write_f32::<LittleEndian>(self.g)?;
         writer.write_f32::<LittleEndian>(self.b)?;
@@ -268,7 +270,7 @@ pub struct Quat {
     pub w: f32,
 }
 impl Quat {
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             x: reader.read_f32::<LittleEndian>()?,
             y: reader.read_f32::<LittleEndian>()?,
@@ -276,7 +278,7 @@ impl Quat {
             w: reader.read_f32::<LittleEndian>()?,
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         writer.write_f32::<LittleEndian>(self.x)?;
         writer.write_f32::<LittleEndian>(self.y)?;
         writer.write_f32::<LittleEndian>(self.z)?;
@@ -291,14 +293,14 @@ pub struct Rotator {
     pub z: f32,
 }
 impl Rotator {
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             x: reader.read_f32::<LittleEndian>()?,
             y: reader.read_f32::<LittleEndian>()?,
             z: reader.read_f32::<LittleEndian>()?,
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         writer.write_f32::<LittleEndian>(self.x)?;
         writer.write_f32::<LittleEndian>(self.y)?;
         writer.write_f32::<LittleEndian>(self.z)?;
@@ -312,14 +314,14 @@ pub struct Vector {
     pub z: f32,
 }
 impl Vector {
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             x: reader.read_f32::<LittleEndian>()?,
             y: reader.read_f32::<LittleEndian>()?,
             z: reader.read_f32::<LittleEndian>()?,
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         writer.write_f32::<LittleEndian>(self.x)?;
         writer.write_f32::<LittleEndian>(self.y)?;
         writer.write_f32::<LittleEndian>(self.z)?;
@@ -332,13 +334,13 @@ pub struct Vector2D {
     pub y: f32,
 }
 impl Vector2D {
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             x: reader.read_f32::<LittleEndian>()?,
             y: reader.read_f32::<LittleEndian>()?,
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         writer.write_f32::<LittleEndian>(self.x)?;
         writer.write_f32::<LittleEndian>(self.y)?;
         Ok(())
@@ -350,13 +352,13 @@ pub struct Box {
     pub b: Vector,
 }
 impl Box {
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         let a = Vector::read(reader)?;
         let b = Vector::read(reader)?;
         reader.read_u8()?;
         Ok(Self { a, b })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         self.a.write(writer)?;
         self.b.write(writer)?;
         Ok(())
@@ -368,7 +370,7 @@ pub struct Text {
     pub value: String,
 }
 impl<R: Read> Readable<R> for Text {
-    fn read(reader: &mut R) -> Result<Self> {
+    fn read(reader: &mut R) -> TResult<Self> {
         let magic = reader.read_u8()?;
         match magic {
             2 => {
@@ -379,7 +381,7 @@ impl<R: Read> Readable<R> for Text {
                 reader.read_u8()?;
                 read_string(reader)?;
             }
-            _ => panic!("unknown magic byte for Text: {magic}"),
+            _ => return Err(crate::error::Error::Other("unknown magic byte for Text")),
         };
         Ok(Self {
             magic,
@@ -442,7 +444,7 @@ pub enum ValueArray {
 }
 
 impl ValueBase {
-    fn read<R: Read>(t: &PropertyType, reader: &mut R) -> Result<Option<ValueBase>> {
+    fn read<R: Read>(t: &PropertyType, reader: &mut R) -> TResult<Option<ValueBase>> {
         Ok(match t {
             PropertyType::Guid => Some(ValueBase::Guid(uuid::Uuid::read(reader)?)),
             PropertyType::DateTime => Some(ValueBase::DateTime(reader.read_u64::<LittleEndian>()?)),
@@ -467,7 +469,7 @@ impl ValueBase {
             _ => None,
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         match &self {
             ValueBase::Guid(v) => v.write(writer)?,
             ValueBase::DateTime(v) => writer.write_u64::<LittleEndian>(*v)?,
@@ -490,14 +492,14 @@ impl ValueBase {
     }
 }
 impl ValueStruct {
-    fn read<R: Read>(t: &PropertyType, reader: &mut R) -> Result<ValueStruct> {
+    fn read<R: Read>(t: &PropertyType, reader: &mut R) -> TResult<ValueStruct> {
         Ok(if let Some(base) = ValueBase::read(t, reader)? {
             ValueStruct::Base(base)
         } else {
             ValueStruct::Struct(read_properties_until_none(reader)?)
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         match self {
             ValueStruct::Base(v) => v.write(writer)?,
             ValueStruct::Struct(v) => write_properties_none_terminated(writer, v)?,
@@ -506,14 +508,14 @@ impl ValueStruct {
     }
 }
 impl ValueKey {
-    fn read<R: Read>(t: &PropertyType, reader: &mut R) -> Result<ValueKey> {
+    fn read<R: Read>(t: &PropertyType, reader: &mut R) -> TResult<ValueKey> {
         Ok(if let Some(base) = ValueBase::read(t, reader)? {
             ValueKey::Base(base)
         } else {
             ValueKey::Struct(uuid::Uuid::read(reader)?)
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         match self {
             ValueKey::Base(v) => v.write(writer)?,
             ValueKey::Struct(v) => v.write(writer)?,
@@ -522,7 +524,7 @@ impl ValueKey {
     }
 }
 impl ValueArray {
-    fn read<R: Read>(t: &PropertyType, reader: &mut R) -> Result<ValueArray> {
+    fn read<R: Read>(t: &PropertyType, reader: &mut R) -> TResult<ValueArray> {
         let count = reader.read_u32::<LittleEndian>()?;
         Ok(match t {
             PropertyType::IntProperty => ValueArray::Int(read_array(count, reader, |r| {
@@ -560,10 +562,10 @@ impl ValueArray {
                     value,
                 }
             }
-            _ => panic!("Missing ValueArray {t:?}"),
+            _ => return Err(crate::error::Error::UnknownArrayType(format!("{t:?}"))),
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         match &self {
             ValueArray::Int(v) => {
                 writer.write_u32::<LittleEndian>(v.len() as u32)?;
@@ -712,7 +714,7 @@ pub struct Property {
 }
 
 impl Property {
-    fn read<R: Read>(reader: &mut R) -> Result<Option<Property>> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Option<Property>> {
         let name = read_string(reader)?;
         if name == "None" {
             Ok(None)
@@ -723,7 +725,7 @@ impl Property {
             Ok(Some(Property { name, value }))
         }
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         write_string(writer, &self.name)?;
         self.value.get_type().write(writer)?;
 
@@ -758,7 +760,7 @@ impl PropertyMeta {
             PropertyMeta::Array { .. } => PropertyType::ArrayProperty,
         }
     }
-    fn read<R: Read>(t: PropertyType, reader: &mut R) -> Result<PropertyMeta> {
+    fn read<R: Read>(t: PropertyType, reader: &mut R) -> TResult<PropertyMeta> {
         match t {
             PropertyType::IntProperty => Ok(PropertyMeta::Int {
                 id: read_optional_uuid(reader)?,
@@ -816,7 +818,7 @@ impl PropertyMeta {
                             Ok(ValueKey::Base(ValueBase::Guid(uuid::Uuid::read(r)?)))
                         })?,
                     }),
-                    _ => panic!("{set_type:#?} not implemented for SetProperty"),
+                    _ => return Err(crate::error::Error::UnknownSetType(format!("{set_type:?}"))),
                 }
             }
             PropertyType::MapProperty => {
@@ -859,10 +861,10 @@ impl PropertyMeta {
                     value,
                 })
             }
-            _ => panic!("Missing PropertyMeta {t:?}"),
+            _ => return Err(crate::error::Error::UnknownPropertyMeta(format!("{t:?}"))),
         }
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<usize> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<usize> {
         Ok(match self {
             PropertyMeta::Int { id, value } => {
                 write_optional_uuid(writer, *id)?;
@@ -920,7 +922,7 @@ impl PropertyMeta {
             }
             PropertyMeta::Text { id, /* value */ .. } => {
                 write_optional_uuid(writer, *id)?;
-                panic!("TODO: write PropertyMeta::Text");
+                todo!("TODO: write PropertyMeta::Text");
                 //write_string(writer, value)?;
             }
             PropertyMeta::MulticastInlineDelegate { id, value } => {
@@ -1005,7 +1007,7 @@ pub struct CustomFormatData {
     pub value: i32,
 }
 impl<R: Read> Readable<R> for CustomFormatData {
-    fn read(reader: &mut R) -> Result<Self> {
+    fn read(reader: &mut R) -> TResult<Self> {
         Ok(CustomFormatData {
             id: uuid::Uuid::read(reader)?,
             value: reader.read_i32::<LittleEndian>()?,
@@ -1013,7 +1015,7 @@ impl<R: Read> Readable<R> for CustomFormatData {
     }
 }
 impl<W: Write> Writable<W> for CustomFormatData {
-    fn write(&self, writer: &mut W) -> Result<()> {
+    fn write(&self, writer: &mut W) -> TResult<()> {
         self.id.write(writer)?;
         writer.write_i32::<LittleEndian>(self.value)?;
         Ok(())
@@ -1033,8 +1035,10 @@ pub struct Header {
     pub custom_format: Vec<CustomFormatData>,
 }
 impl<R: Read> Readable<R> for Header {
-    fn read(reader: &mut R) -> Result<Self> {
-        assert_eq!(reader.read_u32::<BigEndian>()?, 0x47564153); // GVAS
+    fn read(reader: &mut R) -> TResult<Self> {
+        if reader.read_u32::<LittleEndian>()? != u32::from_le_bytes(*b"GVAS") {
+            return Err(crate::error::Error::BadMagic());
+        }
         Ok(Header {
             save_game_version: reader.read_u32::<LittleEndian>()?,
             package_version: reader.read_u32::<LittleEndian>()?,
@@ -1051,8 +1055,8 @@ impl<R: Read> Readable<R> for Header {
     }
 }
 impl<W: Write> Writable<W> for Header {
-    fn write(&self, writer: &mut W) -> Result<()> {
-        writer.write_u32::<BigEndian>(0x47564153)?;
+    fn write(&self, writer: &mut W) -> TResult<()> {
+        writer.write_u32::<LittleEndian>(u32::from_le_bytes(*b"GVAS"))?;
         writer.write_u32::<LittleEndian>(self.save_game_version)?;
         writer.write_u32::<LittleEndian>(self.package_version)?;
         writer.write_u16::<LittleEndian>(self.engine_version_major)?;
@@ -1075,13 +1079,13 @@ pub struct Root {
     pub root: Vec<Property>,
 }
 impl Root {
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             save_game_type: read_string(reader)?,
             root: read_properties_until_none(reader)?,
         })
     }
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         write_string(writer, &self.save_game_type)?;
         write_properties_none_terminated(writer, &self.root)?;
         Ok(())
@@ -1094,13 +1098,12 @@ pub struct Save {
     pub root: Root,
 }
 impl Save {
-    pub fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    pub fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         let header = Header::read(reader)?;
         let root = Root::read(reader)?;
-        assert_eq!(reader.read_u32::<LittleEndian>()?, 0);
         Ok(Self { header, root })
     }
-    pub fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    pub fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         self.header.write(writer)?;
         self.root.write(writer)?;
         writer.write_u32::<LittleEndian>(0)?;
@@ -1117,7 +1120,7 @@ mod tests {
 
     static SAVE: &'static [u8] = include_bytes!("../drg-save-test.sav");
     #[test]
-    fn test_header() -> Result<()> {
+    fn test_header() -> TResult<()> {
         let original = vec![
             0x47, 0x56, 0x41, 0x53, 0x02, 0x00, 0x00, 0x00, 0x06, 0x02, 0x00, 0x00, 0x04, 0x00,
             0x19, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00, 0x2B, 0x2B,
@@ -1204,7 +1207,7 @@ mod tests {
     }
 
     #[test]
-    fn test_uuid() -> Result<()> {
+    fn test_uuid() -> TResult<()> {
         let id = uuid::uuid!("2eb5fdbd4d1001ac8ff33681daa59333");
         let mut writer = vec![];
         id.write(&mut writer)?;
@@ -1215,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rw_save1() -> Result<()> {
+    fn test_rw_save1() -> TResult<()> {
         let mut reader = Cursor::new(&SAVE);
         let obj = Save::read(&mut reader)?;
         let mut reconstructed: Vec<u8> = vec![];
@@ -1225,7 +1228,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rw_property_meta() -> Result<()> {
+    fn test_rw_property_meta() -> TResult<()> {
         let original = vec![
             0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
@@ -1246,7 +1249,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rw_property_meta_str() -> Result<()> {
+    fn test_rw_property_meta_str() -> TResult<()> {
         let original = vec![
             0x00, 0x32, 0x00, 0x00, 0x00, 0x32, 0x33, 0x37, 0x30, 0x32, 0x34, 0x32, 0x34, 0x31,
             0x31, 0x32, 0x37, 0x39, 0x31, 0x34, 0x35, 0x39, 0x30, 0x31, 0x31, 0x38, 0x31, 0x36,
@@ -1263,7 +1266,7 @@ mod tests {
     }
 
     #[test]
-    fn test_read_int_property() -> Result<()> {
+    fn test_read_int_property() -> TResult<()> {
         let bytes = b"\x0E\x00\x00\x00\x56\x65\x72\x73\x69\x6F\x6E\x4E\x75\x6D\x62\x65\x72\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00";
         let mut reader = Cursor::new(bytes);
         assert_eq!(
@@ -1277,7 +1280,7 @@ mod tests {
     }
 
     #[test]
-    fn test_read_struct_property() -> Result<()> {
+    fn test_read_struct_property() -> TResult<()> {
         let bytes = b"\x12\x00\x00\x00\x56\x61\x6E\x69\x74\x79\x4D\x61\x73\x74\x65\x72\x79\x53\x61\x76\x65\x00\x0F\x00\x00\x00\x53\x74\x72\x75\x63\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x8D\x00\x00\x00\x00\x00\x00\x00\x12\x00\x00\x00\x56\x61\x6E\x69\x74\x79\x4D\x61\x73\x74\x65\x72\x79\x53\x61\x76\x65\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x06\x00\x00\x00\x4C\x65\x76\x65\x6C\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x8C\x00\x00\x00\x03\x00\x00\x00\x58\x50\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x3A\x23\x00\x00\x1A\x00\x00\x00\x48\x61\x73\x41\x77\x61\x72\x64\x65\x64\x46\x6F\x72\x4F\x6C\x64\x50\x75\x72\x63\x68\x61\x73\x65\x73\x00\x0D\x00\x00\x00\x42\x6F\x6F\x6C\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x05\x00\x00\x00\x4E\x6F\x6E\x65\x00";
         let mut reader = Cursor::new(bytes);
         assert_eq!(
@@ -1318,7 +1321,7 @@ mod tests {
     }
 
     #[test]
-    fn test_read_array_property() -> Result<()> {
+    fn test_read_array_property() -> TResult<()> {
         let bytes = b"\x0C\x00\x00\x00\x53\x74\x61\x74\x49\x6E\x64\x69\x63\x65\x73\x00\x0E\x00\x00\x00\x41\x72\x72\x61\x79\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x08\x00\x00\x00\x00\x00\x00\x00\x0C\x00\x00\x00\x49\x6E\x74\x50\x72\x6F\x70\x65\x72\x74\x79\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00";
         let mut reader = Cursor::new(bytes);
         assert_eq!(
@@ -1336,7 +1339,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rw_property_int() -> Result<()> {
+    fn test_rw_property_int() -> TResult<()> {
         let original = vec![
             0x0E, 0x00, 0x00, 0x00, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6F, 0x6E, 0x4E, 0x75, 0x6D,
             0x62, 0x65, 0x72, 0x00, 0x0C, 0x00, 0x00, 0x00, 0x49, 0x6E, 0x74, 0x50, 0x72, 0x6F,
@@ -1353,7 +1356,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rw_property_bool() -> Result<()> {
+    fn test_rw_property_bool() -> TResult<()> {
         let original = vec![
             0x13, 0x00, 0x00, 0x00, 0x48, 0x61, 0x76, 0x65, 0x53, 0x6B, 0x69, 0x6E, 0x73, 0x42,
             0x65, 0x65, 0x6E, 0x52, 0x65, 0x73, 0x65, 0x74, 0x00, 0x0D, 0x00, 0x00, 0x00, 0x42,
@@ -1370,7 +1373,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rw_property_struct() -> Result<()> {
+    fn test_rw_property_struct() -> TResult<()> {
         let original = vec![
             0x08, 0x00, 0x00, 0x00, 0x46, 0x6F, 0x72, 0x67, 0x69, 0x6E, 0x67, 0x00, 0x0F, 0x00,
             0x00, 0x00, 0x53, 0x74, 0x72, 0x75, 0x63, 0x74, 0x50, 0x72, 0x6F, 0x70, 0x65, 0x72,
@@ -1392,7 +1395,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rw_property_struct2() -> Result<()> {
+    fn test_rw_property_struct2() -> TResult<()> {
         let original = vec![
             0x07, 0x00, 0x00, 0x00, 0x44, 0x72, 0x69, 0x6E, 0x6B, 0x73, 0x00, 0x0F, 0x00, 0x00,
             0x00, 0x53, 0x74, 0x72, 0x75, 0x63, 0x74, 0x50, 0x72, 0x6F, 0x70, 0x65, 0x72, 0x74,
@@ -1435,7 +1438,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rw_property_array() -> Result<()> {
+    fn test_rw_property_array() -> TResult<()> {
         let original = vec![
             0x0E, 0x00, 0x00, 0x00, 0x55, 0x6E, 0x6C, 0x6F, 0x63, 0x6B, 0x65, 0x64, 0x49, 0x74,
             0x65, 0x6D, 0x73, 0x00, 0x0E, 0x00, 0x00, 0x00, 0x41, 0x72, 0x72, 0x61, 0x79, 0x50,
@@ -1468,7 +1471,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rw_property_str() -> Result<()> {
+    fn test_rw_property_str() -> TResult<()> {
         let original = vec![
             0x11, 0x00, 0x00, 0x00, 0x57, 0x61, 0x74, 0x63, 0x68, 0x65, 0x64, 0x54, 0x75, 0x74,
             0x6F, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x0E, 0x00, 0x00, 0x00, 0x41, 0x72, 0x72,
@@ -1614,7 +1617,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rw_header() -> Result<()> {
+    fn test_rw_header() -> TResult<()> {
         let original = vec![
             0x47, 0x56, 0x41, 0x53, 0x02, 0x00, 0x00, 0x00, 0x0A, 0x02, 0x00, 0x00, 0x04, 0x00,
             0x1B, 0x00, 0x02, 0x00, 0xFA, 0x14, 0x01, 0x80, 0x05, 0x00, 0x00, 0x00, 0x6D, 0x61,
