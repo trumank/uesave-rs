@@ -69,7 +69,12 @@ pub fn main() -> Result<()> {
             serde_json::to_writer_pretty(BufWriter::new(&temp), &value)?;
 
             // launch editor
-            std::process::Command::new(editor)
+            let mut args = shell_words::split(&editor)
+                .expect("failed to parse EDITOR")
+                .into_iter();
+            std::process::Command::new(&args.next().expect("EDITOR empty"))
+                .args(args)
+                .arg("--")
                 .arg(temp.path())
                 .stdin(std::process::Stdio::piped())
                 .spawn()?
