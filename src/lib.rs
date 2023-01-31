@@ -1045,9 +1045,7 @@ impl<R: Read> Readable<R> for Header {
             engine_version_build: reader.read_u32::<LE>()?,
             engine_version: read_string(reader)?,
             custom_format_version: reader.read_u32::<LE>()?,
-            custom_format: read_array(reader.read_u32::<LE>()?, reader, |r| {
-                CustomFormatData::read(r)
-            })?,
+            custom_format: read_array(reader.read_u32::<LE>()?, reader, CustomFormatData::read)?,
         })
     }
 }
