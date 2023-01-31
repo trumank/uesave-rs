@@ -70,16 +70,29 @@ fn read_array<T, R: Read>(
     (0..length).map(|_| f(reader)).collect()
 }
 
+#[rustfmt::skip]
 impl<R: Read> Readable<R> for uuid::Uuid {
     fn read(reader: &mut R) -> TResult<uuid::Uuid> {
-        let mut buf = [0; 16];
-        reader.read_exact(&mut buf)?;
-        Ok(uuid::Uuid::from_bytes(buf))
+        let mut b = [0; 16];
+        reader.read_exact(&mut b)?;
+        Ok(uuid::Uuid::from_bytes([
+            b[0x3], b[0x2], b[0x1], b[0x0],
+            b[0x7], b[0x6], b[0x5], b[0x4],
+            b[0xb], b[0xa], b[0x9], b[0x8],
+            b[0xf], b[0xe], b[0xd], b[0xc],
+        ]))
     }
 }
+#[rustfmt::skip]
 impl<W: Write> Writable<W> for uuid::Uuid {
     fn write(&self, writer: &mut W) -> TResult<()> {
-        writer.write_all(self.as_bytes())?;
+        let b = self.as_bytes();
+        writer.write_all(&[
+            b[0x3], b[0x2], b[0x1], b[0x0],
+            b[0x7], b[0x6], b[0x5], b[0x4],
+            b[0xb], b[0xa], b[0x9], b[0x8],
+            b[0xf], b[0xe], b[0xd], b[0xc],
+        ])?;
         Ok(())
     }
 }
@@ -1209,6 +1222,21 @@ mod tests {
         let mut reader = Cursor::new(&writer);
         let rid = uuid::Uuid::read(&mut reader)?;
         assert_eq!(id, rid);
+        Ok(())
+    }
+
+    #[test]
+    fn test_uuid2() -> TResult<()> {
+        let id = uuid::uuid!("85b20ca1-49fb-7138-a154-c89a2c20e2cd");
+        let mut writer = vec![];
+        id.write(&mut writer)?;
+        assert_eq!(
+            writer,
+            [
+                0xa1, 0x0c, 0xb2, 0x85, 0x38, 0x71, 0xfb, 0x49, 0x9a, 0xc8, 0x54, 0xa1, 0xcd, 0xe2,
+                0x20, 0x2c
+            ]
+        );
         Ok(())
     }
 
