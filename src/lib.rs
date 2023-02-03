@@ -112,6 +112,7 @@ pub enum PropertyType {
     FloatProperty,
     BoolProperty,
     ByteProperty,
+    EnumProperty,
     StructProperty,
     ArrayProperty,
     ObjectProperty,
@@ -140,6 +141,7 @@ impl PropertyType {
             "FloatProperty" => Ok(PropertyType::FloatProperty),
             "BoolProperty" => Ok(PropertyType::BoolProperty),
             "ByteProperty" => Ok(PropertyType::ByteProperty),
+            "EnumProperty" => Ok(PropertyType::EnumProperty),
             "StructProperty" => Ok(PropertyType::StructProperty),
             "ArrayProperty" => Ok(PropertyType::ArrayProperty),
             "ObjectProperty" => Ok(PropertyType::ObjectProperty),
@@ -169,6 +171,7 @@ impl PropertyType {
                 PropertyType::FloatProperty => "FloatProperty",
                 PropertyType::BoolProperty => "BoolProperty",
                 PropertyType::ByteProperty => "ByteProperty",
+                PropertyType::EnumProperty => "EnumProperty",
                 PropertyType::StructProperty => "StructProperty",
                 PropertyType::ArrayProperty => "ArrayProperty",
                 PropertyType::ObjectProperty => "ObjectProperty",
@@ -185,11 +188,13 @@ impl PropertyType {
     }
 }
 
+type DateTime = u64;
 type Int = i32;
 type UInt32 = u32;
 type Float = f32;
 type Bool = bool;
 type Byte = String;
+type Enum = String;
 type StructKey = uuid::Uuid;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -407,12 +412,13 @@ impl<R: Read> Readable<R> for Text {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ValueBase {
     Guid(uuid::Uuid),
-    DateTime(u64),
-    Int(i32),
-    UInt32(u32),
-    Float(f32),
-    Bool(bool),
-    Byte(String),
+    DateTime(DateTime),
+    Int(Int),
+    UInt32(UInt32),
+    Float(Float),
+    Bool(Bool),
+    Byte(Byte),
+    Enum(Enum),
     Quat(Quat),
     LinearColor(LinearColor),
     Rotator(Rotator),
@@ -476,6 +482,7 @@ impl ValueBase {
             PropertyType::StrProperty => Some(ValueBase::Str(read_string(reader)?)),
             PropertyType::ObjectProperty => Some(ValueBase::Object(read_string(reader)?)),
             PropertyType::ByteProperty => Some(ValueBase::Byte(read_string(reader)?)),
+            PropertyType::EnumProperty => Some(ValueBase::Enum(read_string(reader)?)),
             _ => None,
         })
     }
@@ -497,6 +504,7 @@ impl ValueBase {
             ValueBase::Str(v) => write_string(writer, v)?,
             ValueBase::Object(v) => write_string(writer, v)?,
             ValueBase::Byte(v) => write_string(writer, v)?,
+            ValueBase::Enum(v) => write_string(writer, v)?,
         };
         Ok(())
     }
@@ -664,6 +672,12 @@ pub enum PropertyMeta {
         value: Byte,
         enum_type: String,
     },
+    Enum {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<uuid::Uuid>,
+        value: Enum,
+        enum_type: String,
+    },
     Str {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
@@ -757,6 +771,7 @@ impl PropertyMeta {
             PropertyMeta::Float { .. } => PropertyType::FloatProperty,
             PropertyMeta::Bool { .. } => PropertyType::BoolProperty,
             PropertyMeta::Byte { .. } => PropertyType::ByteProperty,
+            PropertyMeta::Enum { .. } => PropertyType::EnumProperty,
             PropertyMeta::Name { .. } => PropertyType::NameProperty,
             PropertyMeta::Str { .. } => PropertyType::StrProperty,
             PropertyMeta::Object { .. } => PropertyType::ObjectProperty,
@@ -789,6 +804,11 @@ impl PropertyMeta {
                 id: read_optional_uuid(reader)?,
             }),
             PropertyType::ByteProperty => Ok(PropertyMeta::Byte {
+                enum_type: read_string(reader)?,
+                id: read_optional_uuid(reader)?,
+                value: read_string(reader)?,
+            }),
+            PropertyType::EnumProperty => Ok(PropertyMeta::Enum {
                 enum_type: read_string(reader)?,
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
@@ -905,6 +925,16 @@ impl PropertyMeta {
                 write_optional_uuid(writer, *id)?;
                 write_string(writer, value)?;
                 61
+            }
+            PropertyMeta::Enum {
+                enum_type,
+                id,
+                value,
+            } => {
+                write_string(writer, enum_type)?;
+                write_optional_uuid(writer, *id)?;
+                write_string(writer, value)?;
+                29
             }
             PropertyMeta::Name { id, value } => {
                 write_optional_uuid(writer, *id)?;
