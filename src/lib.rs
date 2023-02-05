@@ -121,6 +121,7 @@ pub enum PropertyType {
     ArrayProperty,
     ObjectProperty,
     StrProperty,
+    SoftObjectProperty,
     NameProperty,
     TextProperty,
     MulticastInlineDelegateProperty,
@@ -150,6 +151,7 @@ impl PropertyType {
             "ArrayProperty" => Ok(PropertyType::ArrayProperty),
             "ObjectProperty" => Ok(PropertyType::ObjectProperty),
             "StrProperty" => Ok(PropertyType::StrProperty),
+            "SoftObjectProperty" => Ok(PropertyType::SoftObjectProperty),
             "NameProperty" => Ok(PropertyType::NameProperty),
             "TextProperty" => Ok(PropertyType::TextProperty),
             "MulticastInlineDelegateProperty" => Ok(PropertyType::MulticastInlineDelegateProperty),
@@ -180,6 +182,7 @@ impl PropertyType {
                 PropertyType::ArrayProperty => "ArrayProperty",
                 PropertyType::ObjectProperty => "ObjectProperty",
                 PropertyType::StrProperty => "StrProperty",
+                PropertyType::SoftObjectProperty => "SoftObjectProperty",
                 PropertyType::NameProperty => "NameProperty",
                 PropertyType::TextProperty => "TextProperty",
                 PropertyType::MulticastInlineDelegateProperty => "MulticastInlineDelegateProperty",
@@ -431,6 +434,7 @@ pub enum ValueBase {
     Box(Box),
     Name(String),
     Str(String),
+    SoftObject(String, String),
     Object(String),
 }
 
@@ -455,6 +459,7 @@ pub enum ValueArray {
     Float(Vec<Float>),
     Byte(Vec<Byte>),
     Str(Vec<String>),
+    SoftObject(Vec<(String, String)>),
     Name(Vec<String>),
     Object(Vec<String>),
     Box(Vec<Box>),
@@ -484,6 +489,10 @@ impl ValueBase {
             PropertyType::Box => Some(ValueBase::Box(Box::read(reader)?)),
             PropertyType::NameProperty => Some(ValueBase::Name(read_string(reader)?)),
             PropertyType::StrProperty => Some(ValueBase::Str(read_string(reader)?)),
+            PropertyType::SoftObjectProperty => Some(ValueBase::SoftObject(
+                read_string(reader)?,
+                read_string(reader)?,
+            )),
             PropertyType::ObjectProperty => Some(ValueBase::Object(read_string(reader)?)),
             PropertyType::ByteProperty => Some(ValueBase::Byte(read_string(reader)?)),
             PropertyType::EnumProperty => Some(ValueBase::Enum(read_string(reader)?)),
@@ -506,6 +515,10 @@ impl ValueBase {
             ValueBase::Box(v) => v.write(writer)?,
             ValueBase::Name(v) => write_string(writer, v)?,
             ValueBase::Str(v) => write_string(writer, v)?,
+            ValueBase::SoftObject(a, b) => {
+                write_string(writer, a)?;
+                write_string(writer, b)?;
+            }
             ValueBase::Object(v) => write_string(writer, v)?,
             ValueBase::Byte(v) => write_string(writer, v)?,
             ValueBase::Enum(v) => write_string(writer, v)?,
@@ -560,6 +573,11 @@ impl ValueArray {
             }
             PropertyType::ByteProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
             PropertyType::StrProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
+            PropertyType::SoftObjectProperty => {
+                ValueArray::SoftObject(read_array(count, reader, |r| {
+                    Ok((read_string(r)?, read_string(r)?))
+                })?)
+            }
             PropertyType::NameProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
             PropertyType::ObjectProperty => {
                 ValueArray::Byte(read_array(count, reader, read_string)?)
@@ -614,6 +632,13 @@ impl ValueArray {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
                     write_string(writer, i)?;
+                }
+            }
+            ValueArray::SoftObject(v) => {
+                writer.write_u32::<LE>(v.len() as u32)?;
+                for (a, b) in v {
+                    write_string(writer, a)?;
+                    write_string(writer, b)?;
                 }
             }
             ValueArray::Box(v) => {
@@ -686,6 +711,12 @@ pub enum PropertyMeta {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: String,
+    },
+    SoftObject {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<uuid::Uuid>,
+        value: String,
+        value2: String,
     },
     Name {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -778,6 +809,7 @@ impl PropertyMeta {
             PropertyMeta::Enum { .. } => PropertyType::EnumProperty,
             PropertyMeta::Name { .. } => PropertyType::NameProperty,
             PropertyMeta::Str { .. } => PropertyType::StrProperty,
+            PropertyMeta::SoftObject { .. } => PropertyType::SoftObjectProperty,
             PropertyMeta::Object { .. } => PropertyType::ObjectProperty,
             PropertyMeta::Text { .. } => PropertyType::TextProperty,
             PropertyMeta::MulticastInlineDelegate { .. } => {
@@ -824,6 +856,11 @@ impl PropertyMeta {
             PropertyType::StrProperty => Ok(PropertyMeta::Str {
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
+            }),
+            PropertyType::SoftObjectProperty => Ok(PropertyMeta::SoftObject {
+                id: read_optional_uuid(reader)?,
+                value: read_string(reader)?,
+                value2: read_string(reader)?,
             }),
             PropertyType::ObjectProperty => Ok(PropertyMeta::Object {
                 id: read_optional_uuid(reader)?,
@@ -952,6 +989,15 @@ impl PropertyMeta {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 write_string(&mut buf, value)?;
+                let size = buf.len();
+                writer.write_all(&buf)?;
+                size
+            }
+            PropertyMeta::SoftObject { id, value, value2 } => {
+                write_optional_uuid(writer, *id)?;
+                let mut buf = vec![];
+                write_string(&mut buf, value)?;
+                write_string(&mut buf, value2)?;
                 let size = buf.len();
                 writer.write_all(&buf)?;
                 size
