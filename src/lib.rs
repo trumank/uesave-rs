@@ -965,7 +965,7 @@ impl PropertyMeta {
                 write_string(writer, enum_type)?;
                 write_optional_uuid(writer, *id)?;
                 write_string(writer, value)?;
-                61
+                value.len() + 5
             }
             PropertyMeta::Enum {
                 enum_type,
@@ -975,7 +975,7 @@ impl PropertyMeta {
                 write_string(writer, enum_type)?;
                 write_optional_uuid(writer, *id)?;
                 write_string(writer, value)?;
-                29
+                value.len() + 5
             }
             PropertyMeta::Name { id, value } => {
                 write_optional_uuid(writer, *id)?;
