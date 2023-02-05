@@ -40,9 +40,13 @@ fn read_string<R: Read>(reader: &mut R) -> TResult<String> {
     Ok(String::from_utf8_lossy(&chars[..length]).into_owned())
 }
 fn write_string<W: Write>(writer: &mut W, string: &str) -> TResult<()> {
-    writer.write_u32::<LE>(string.as_bytes().len() as u32 + 1)?;
-    writer.write_all(string.as_bytes())?;
-    writer.write_u8(0)?;
+    if string.is_empty() {
+        writer.write_u32::<LE>(0)?;
+    } else {
+        writer.write_u32::<LE>(string.as_bytes().len() as u32 + 1)?;
+        writer.write_all(string.as_bytes())?;
+        writer.write_u8(0)?;
+    }
     Ok(())
 }
 fn read_properties_until_none<R: Read>(reader: &mut R) -> TResult<Vec<Property>> {
