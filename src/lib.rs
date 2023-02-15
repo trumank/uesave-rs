@@ -871,10 +871,19 @@ impl PropertyMeta {
                 value: reader.read_u8()? > 0,
                 id: read_optional_uuid(reader)?,
             }),
-            PropertyType::ByteProperty => Ok(PropertyMeta::Byte {
-                enum_type: read_string(reader)?,
-                id: read_optional_uuid(reader)?,
-                value: read_string(reader)?,
+            PropertyType::ByteProperty => Ok({
+                let enum_type = read_string(reader)?;
+                let id = read_optional_uuid(reader)?;
+                let value = if enum_type == "None" {
+                    reader.read_u8()?.to_string()
+                } else {
+                    read_string(reader)?
+                };
+                PropertyMeta::Byte {
+                    enum_type,
+                    id,
+                    value,
+                }
             }),
             PropertyType::EnumProperty => Ok(PropertyMeta::Enum {
                 enum_type: read_string(reader)?,
