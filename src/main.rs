@@ -55,7 +55,7 @@ pub fn main() -> Result<()> {
     match args.action {
         Action::ToJson(io) => {
             let save = Save::read(&mut input(&io.input)?)?;
-            serde_json::to_writer(output(&io.output)?, &save)?;
+            serde_json::to_writer_pretty(output(&io.output)?, &save)?;
         }
         Action::FromJson(io) => {
             let save: Save = serde_json::from_reader(&mut input(&io.input)?)?;
