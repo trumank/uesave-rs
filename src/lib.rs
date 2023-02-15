@@ -112,6 +112,7 @@ pub enum PropertyType {
     Rotator,
     LinearColor,
     IntProperty,
+    Int64Property,
     UInt32Property,
     FloatProperty,
     BoolProperty,
@@ -142,6 +143,7 @@ impl PropertyType {
             "Rotator" => Ok(PropertyType::Rotator),
             "LinearColor" => Ok(PropertyType::LinearColor),
             "IntProperty" => Ok(PropertyType::IntProperty),
+            "Int64Property" => Ok(PropertyType::Int64Property),
             "UInt32Property" => Ok(PropertyType::UInt32Property),
             "FloatProperty" => Ok(PropertyType::FloatProperty),
             "BoolProperty" => Ok(PropertyType::BoolProperty),
@@ -173,6 +175,7 @@ impl PropertyType {
                 PropertyType::Rotator => "Rotator",
                 PropertyType::LinearColor => "LinearColor",
                 PropertyType::IntProperty => "IntProperty",
+                PropertyType::Int64Property => "Int64Property",
                 PropertyType::UInt32Property => "UInt32Property",
                 PropertyType::FloatProperty => "FloatProperty",
                 PropertyType::BoolProperty => "BoolProperty",
@@ -197,6 +200,7 @@ impl PropertyType {
 
 type DateTime = u64;
 type Int = i32;
+type Int64 = i64;
 type UInt32 = u32;
 type Float = f32;
 type Bool = bool;
@@ -421,6 +425,7 @@ pub enum ValueBase {
     Guid(uuid::Uuid),
     DateTime(DateTime),
     Int(Int),
+    Int64(Int64),
     UInt32(UInt32),
     Float(Float),
     Bool(Bool),
@@ -455,6 +460,7 @@ pub enum ValueKey {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ValueArray {
     Int(Vec<Int>),
+    Int64(Vec<Int64>),
     UInt32(Vec<UInt32>),
     Float(Vec<Float>),
     Byte(Vec<Byte>),
@@ -478,6 +484,7 @@ impl ValueBase {
             PropertyType::Guid => Some(ValueBase::Guid(uuid::Uuid::read(reader)?)),
             PropertyType::DateTime => Some(ValueBase::DateTime(reader.read_u64::<LE>()?)),
             PropertyType::IntProperty => Some(ValueBase::Int(reader.read_i32::<LE>()?)),
+            PropertyType::Int64Property => Some(ValueBase::Int64(reader.read_i64::<LE>()?)),
             PropertyType::UInt32Property => Some(ValueBase::UInt32(reader.read_u32::<LE>()?)),
             PropertyType::FloatProperty => Some(ValueBase::Float(reader.read_f32::<LE>()?)),
             PropertyType::BoolProperty => Some(ValueBase::Bool(reader.read_u8()? > 0)),
@@ -504,6 +511,7 @@ impl ValueBase {
             ValueBase::Guid(v) => v.write(writer)?,
             ValueBase::DateTime(v) => writer.write_u64::<LE>(*v)?,
             ValueBase::Int(v) => writer.write_i32::<LE>(*v)?,
+            ValueBase::Int64(v) => writer.write_i64::<LE>(*v)?,
             ValueBase::UInt32(v) => writer.write_u32::<LE>(*v)?,
             ValueBase::Float(v) => writer.write_f32::<LE>(*v)?,
             ValueBase::Bool(v) => writer.write_u8(u8::from(*v))?,
@@ -565,6 +573,9 @@ impl ValueArray {
             PropertyType::IntProperty => {
                 ValueArray::Int(read_array(count, reader, |r| Ok(r.read_i32::<LE>()?))?)
             }
+            PropertyType::Int64Property => {
+                ValueArray::Int64(read_array(count, reader, |r| Ok(r.read_i64::<LE>()?))?)
+            }
             PropertyType::UInt32Property => {
                 ValueArray::UInt32(read_array(count, reader, |r| Ok(r.read_u32::<LE>()?))?)
             }
@@ -611,6 +622,12 @@ impl ValueArray {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
                     writer.write_i32::<LE>(*i)?;
+                }
+            }
+            ValueArray::Int64(v) => {
+                writer.write_u32::<LE>(v.len() as u32)?;
+                for i in v {
+                    writer.write_i64::<LE>(*i)?;
                 }
             }
             ValueArray::UInt32(v) => {
@@ -679,6 +696,11 @@ pub enum PropertyMeta {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
         value: Int,
+    },
+    Int64 {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<uuid::Uuid>,
+        value: Int64,
     },
     UInt32 {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -802,6 +824,7 @@ impl PropertyMeta {
     fn get_type(&self) -> PropertyType {
         match &self {
             PropertyMeta::Int { .. } => PropertyType::IntProperty,
+            PropertyMeta::Int64 { .. } => PropertyType::Int64Property,
             PropertyMeta::UInt32 { .. } => PropertyType::UInt32Property,
             PropertyMeta::Float { .. } => PropertyType::FloatProperty,
             PropertyMeta::Bool { .. } => PropertyType::BoolProperty,
@@ -941,6 +964,11 @@ impl PropertyMeta {
                 write_optional_uuid(writer, *id)?;
                 writer.write_i32::<LE>(*value)?;
                 4
+            }
+            PropertyMeta::Int64 { id, value } => {
+                write_optional_uuid(writer, *id)?;
+                writer.write_i64::<LE>(*value)?;
+                8
             }
             PropertyMeta::UInt32 { id, value } => {
                 write_optional_uuid(writer, *id)?;
