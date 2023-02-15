@@ -463,7 +463,7 @@ pub enum ValueArray {
     Int64(Vec<Int64>),
     UInt32(Vec<UInt32>),
     Float(Vec<Float>),
-    Byte(Vec<Byte>),
+    Byte(Vec<u8>),
     Str(Vec<String>),
     SoftObject(Vec<(String, String)>),
     Name(Vec<String>),
@@ -582,16 +582,18 @@ impl ValueArray {
             PropertyType::FloatProperty => {
                 ValueArray::Float(read_array(count, reader, |r| Ok(r.read_f32::<LE>()?))?)
             }
-            PropertyType::ByteProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
-            PropertyType::StrProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
+            PropertyType::ByteProperty => {
+                ValueArray::Byte(read_array(count, reader, |r| Ok(r.read_u8()?))?)
+            }
+            PropertyType::StrProperty => ValueArray::Str(read_array(count, reader, read_string)?),
             PropertyType::SoftObjectProperty => {
                 ValueArray::SoftObject(read_array(count, reader, |r| {
                     Ok((read_string(r)?, read_string(r)?))
                 })?)
             }
-            PropertyType::NameProperty => ValueArray::Byte(read_array(count, reader, read_string)?),
+            PropertyType::NameProperty => ValueArray::Name(read_array(count, reader, read_string)?),
             PropertyType::ObjectProperty => {
-                ValueArray::Byte(read_array(count, reader, read_string)?)
+                ValueArray::Object(read_array(count, reader, read_string)?)
             }
             PropertyType::Box => ValueArray::Box(read_array(count, reader, Box::read)?),
             PropertyType::StructProperty => {
@@ -642,10 +644,13 @@ impl ValueArray {
                     writer.write_f32::<LE>(*i)?;
                 }
             }
-            ValueArray::Byte(v)
-            | ValueArray::Str(v)
-            | ValueArray::Object(v)
-            | ValueArray::Name(v) => {
+            ValueArray::Byte(v) => {
+                writer.write_u32::<LE>(v.len() as u32)?;
+                for i in v {
+                    writer.write_u8(*i)?;
+                }
+            }
+            ValueArray::Str(v) | ValueArray::Object(v) | ValueArray::Name(v) => {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
                     write_string(writer, i)?;
@@ -849,6 +854,10 @@ impl PropertyMeta {
             PropertyType::IntProperty => Ok(PropertyMeta::Int {
                 id: read_optional_uuid(reader)?,
                 value: reader.read_i32::<LE>()?,
+            }),
+            PropertyType::Int64Property => Ok(PropertyMeta::Int64 {
+                id: read_optional_uuid(reader)?,
+                value: reader.read_i64::<LE>()?,
             }),
             PropertyType::UInt32Property => Ok(PropertyMeta::UInt32 {
                 id: read_optional_uuid(reader)?,
