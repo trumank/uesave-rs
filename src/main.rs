@@ -1,7 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{stdin, stdout, BufRead, BufReader, BufWriter, Cursor, Write};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 
 use uesave::Save;
@@ -24,6 +24,12 @@ struct Edit {
     editor: Option<String>,
 }
 
+#[derive(Parser, Debug)]
+struct ActionTestResave {
+    #[arg(required = true, index = 1)]
+    path: String,
+}
+
 #[derive(Subcommand, Debug)]
 enum Action {
     /// Convert binary save to plain text JSON
@@ -32,6 +38,8 @@ enum Action {
     FromJson(IO),
     /// Launch $EDITOR to edit a save file as JSON in place
     Edit(Edit),
+    /// Test resave
+    TestResave(ActionTestResave),
 }
 
 #[derive(Parser, Debug)]
@@ -52,6 +60,15 @@ pub fn main() -> Result<()> {
         Action::FromJson(io) => {
             let save: Save = serde_json::from_reader(&mut input(&io.input)?)?;
             save.write(&mut output(&io.output)?)?;
+        }
+        Action::TestResave(action) => {
+            let mut input = std::io::Cursor::new(std::fs::read(action.path)?);
+            let mut output = std::io::Cursor::new(vec![]);
+            Save::read(&mut input)?.write(&mut output)?;
+            if input.into_inner() != output.into_inner() {
+                return Err(anyhow!("Resave did not match"));
+            }
+            println!("Resave successful");
         }
         Action::Edit(edit) => {
             let editor = match edit.editor {
