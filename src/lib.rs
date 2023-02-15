@@ -204,7 +204,6 @@ type Int64 = i64;
 type UInt32 = u32;
 type Float = f32;
 type Bool = bool;
-type Byte = String;
 type Enum = String;
 type StructKey = uuid::Uuid;
 
@@ -421,6 +420,12 @@ impl<R: Read> Readable<R> for Text {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum Byte {
+    Byte(u8),
+    Label(String),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ValueBase {
     Guid(uuid::Uuid),
     DateTime(DateTime),
@@ -501,7 +506,7 @@ impl ValueBase {
                 read_string(reader)?,
             )),
             PropertyType::ObjectProperty => Some(ValueBase::Object(read_string(reader)?)),
-            PropertyType::ByteProperty => Some(ValueBase::Byte(read_string(reader)?)),
+            PropertyType::ByteProperty => Some(ValueBase::Byte(Byte::Label(read_string(reader)?))),
             PropertyType::EnumProperty => Some(ValueBase::Enum(read_string(reader)?)),
             _ => None,
         })
@@ -528,7 +533,10 @@ impl ValueBase {
                 write_string(writer, b)?;
             }
             ValueBase::Object(v) => write_string(writer, v)?,
-            ValueBase::Byte(v) => write_string(writer, v)?,
+            ValueBase::Byte(v) => match v {
+                Byte::Byte(b) => writer.write_u8(*b)?,
+                Byte::Label(l) => write_string(writer, l)?,
+            },
             ValueBase::Enum(v) => write_string(writer, v)?,
         };
         Ok(())
@@ -806,8 +814,8 @@ impl Property {
             Ok(None)
         } else {
             let t = PropertyType::read(reader)?;
-            let _size = reader.read_u64::<LE>()?;
-            let value = PropertyMeta::read(t, reader)?;
+            let size = reader.read_u64::<LE>()?;
+            let value = PropertyMeta::read(t, size, reader)?;
             Ok(Some(Property { name, value }))
         }
     }
@@ -849,7 +857,7 @@ impl PropertyMeta {
             PropertyMeta::Array { .. } => PropertyType::ArrayProperty,
         }
     }
-    fn read<R: Read>(t: PropertyType, reader: &mut R) -> TResult<PropertyMeta> {
+    fn read<R: Read>(t: PropertyType, size: u64, reader: &mut R) -> TResult<PropertyMeta> {
         match t {
             PropertyType::IntProperty => Ok(PropertyMeta::Int {
                 id: read_optional_uuid(reader)?,
@@ -875,9 +883,9 @@ impl PropertyMeta {
                 let enum_type = read_string(reader)?;
                 let id = read_optional_uuid(reader)?;
                 let value = if enum_type == "None" {
-                    reader.read_u8()?.to_string()
+                    Byte::Byte(reader.read_u8()?)
                 } else {
-                    read_string(reader)?
+                    Byte::Label(read_string(reader)?)
                 };
                 PropertyMeta::Byte {
                     enum_type,
@@ -930,6 +938,27 @@ impl PropertyMeta {
                             Ok(ValueKey::Base(ValueBase::Guid(uuid::Uuid::read(r)?)))
                         })?,
                     }),
+                    PropertyType::ByteProperty => {
+                        // byte property could be a single byte or a string representing an enum
+                        // check which it is based on the size of the property
+                        let value = if size == (8 + count * 1).into() {
+                            read_array(count, reader, |r| {
+                                Ok(ValueKey::Base(ValueBase::Byte(Byte::Byte(r.read_u8()?))))
+                            })?
+                        } else {
+                            read_array(count, reader, |r| {
+                                Ok(ValueKey::Base(ValueBase::Byte(Byte::Label(read_string(
+                                    r,
+                                )?))))
+                            })?
+                        };
+
+                        Ok(PropertyMeta::Set {
+                            id,
+                            set_type,
+                            value,
+                        })
+                    }
                     _ => return Err(crate::error::Error::UnknownSetType(format!("{set_type:?}"))),
                 }
             }
@@ -1010,8 +1039,16 @@ impl PropertyMeta {
             } => {
                 write_string(writer, enum_type)?;
                 write_optional_uuid(writer, *id)?;
-                write_string(writer, value)?;
-                value.len() + 5
+                match value {
+                    Byte::Byte(b) => {
+                        writer.write_u8(*b)?;
+                        1
+                    }
+                    Byte::Label(l) => {
+                        write_string(writer, l)?;
+                        l.len() + 5
+                    }
+                }
             }
             PropertyMeta::Enum {
                 enum_type,
