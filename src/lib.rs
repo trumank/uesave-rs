@@ -426,6 +426,12 @@ pub enum Byte {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum ByteArray {
+    Byte(Vec<u8>),
+    Label(Vec<String>),
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ValueBase {
     Guid(uuid::Uuid),
     DateTime(DateTime),
@@ -468,7 +474,8 @@ pub enum ValueArray {
     Int64(Vec<Int64>),
     UInt32(Vec<UInt32>),
     Float(Vec<Float>),
-    Byte(Vec<u8>),
+    Byte(ByteArray),
+    Enum(Vec<Enum>),
     Str(Vec<String>),
     SoftObject(Vec<(String, String)>),
     Name(Vec<String>),
@@ -575,7 +582,7 @@ impl ValueKey {
     }
 }
 impl ValueArray {
-    fn read<R: Read>(t: &PropertyType, reader: &mut R) -> TResult<ValueArray> {
+    fn read<R: Read>(t: &PropertyType, size: u64, reader: &mut R) -> TResult<ValueArray> {
         let count = reader.read_u32::<LE>()?;
         Ok(match t {
             PropertyType::IntProperty => {
@@ -591,7 +598,14 @@ impl ValueArray {
                 ValueArray::Float(read_array(count, reader, |r| Ok(r.read_f32::<LE>()?))?)
             }
             PropertyType::ByteProperty => {
-                ValueArray::Byte(read_array(count, reader, |r| Ok(r.read_u8()?))?)
+                if size == (4 + count).into() {
+                    ValueArray::Byte(ByteArray::Byte(read_array(count, reader, |r| Ok(r.read_u8()?))?))
+                } else {
+                    ValueArray::Byte(ByteArray::Label(read_array(count, reader, |r| Ok(read_string(r)?))?))
+                }
+            }
+            PropertyType::EnumProperty => {
+                ValueArray::Enum(read_array(count, reader, |r| Ok(read_string(r)?))?)
             }
             PropertyType::StrProperty => ValueArray::Str(read_array(count, reader, read_string)?),
             PropertyType::SoftObjectProperty => {
@@ -653,9 +667,25 @@ impl ValueArray {
                 }
             }
             ValueArray::Byte(v) => {
+                match v {
+                    ByteArray::Byte(b) => {
+                        writer.write_u32::<LE>(b.len() as u32)?;
+                        for b in b {
+                            writer.write_u8(*b)?;
+                        }
+                    }
+                    ByteArray::Label(l) => {
+                        writer.write_u32::<LE>(l.len() as u32)?;
+                        for l in l {
+                            write_string(writer, l)?;
+                        }
+                    }
+                }
+            }
+            ValueArray::Enum(v) => {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
-                    writer.write_u8(*i)?;
+                    write_string(writer, i)?;
                 }
             }
             ValueArray::Str(v) | ValueArray::Object(v) | ValueArray::Name(v) => {
@@ -1001,7 +1031,7 @@ impl PropertyMeta {
             PropertyType::ArrayProperty => {
                 let array_type = PropertyType::read(reader)?;
                 let id = read_optional_uuid(reader)?;
-                let value = ValueArray::read(&array_type, reader)?;
+                let value = ValueArray::read(&array_type, size, reader)?;
 
                 Ok(PropertyMeta::Array {
                     array_type,
