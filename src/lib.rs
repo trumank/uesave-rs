@@ -975,6 +975,13 @@ impl PropertyMeta {
                             Ok(ValueKey::Base(ValueBase::Str(read_string(r)?)))
                         })?,
                     }),
+                    PropertyType::EnumProperty => Ok(PropertyMeta::Set {
+                        id,
+                        set_type,
+                        value: read_array(count, reader, |r| {
+                            Ok(ValueKey::Base(ValueBase::Enum(read_string(r)?)))
+                        })?,
+                    }),
                     PropertyType::ByteProperty => {
                         // byte property could be a single byte or a string representing an enum
                         // check which it is based on the size of the property
