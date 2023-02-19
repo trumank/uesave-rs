@@ -105,9 +105,10 @@ impl<W: Write> Writable<W> for uuid::Uuid {
 pub enum PropertyType {
     Guid,
     DateTime,
-    Box,
     Vector2D,
     Vector,
+    Box,
+    IntPoint,
     Quat,
     Rotator,
     LinearColor,
@@ -136,9 +137,10 @@ impl PropertyType {
         match t.as_str() {
             "Guid" => Ok(PropertyType::Guid),
             "DateTime" => Ok(PropertyType::DateTime),
-            "Box" => Ok(PropertyType::Box),
             "Vector2D" => Ok(PropertyType::Vector2D),
             "Vector" => Ok(PropertyType::Vector),
+            "Box" => Ok(PropertyType::Box),
+            "IntPoint" => Ok(PropertyType::IntPoint),
             "Quat" => Ok(PropertyType::Quat),
             "Rotator" => Ok(PropertyType::Rotator),
             "LinearColor" => Ok(PropertyType::LinearColor),
@@ -168,9 +170,10 @@ impl PropertyType {
             match &self {
                 PropertyType::Guid => "Guid",
                 PropertyType::DateTime => "DateTime",
-                PropertyType::Box => "Box",
                 PropertyType::Vector2D => "Vector2D",
                 PropertyType::Vector => "Vector",
+                PropertyType::Box => "Box",
+                PropertyType::IntPoint => "IntPoint",
                 PropertyType::Quat => "Quat",
                 PropertyType::Rotator => "Rotator",
                 PropertyType::LinearColor => "LinearColor",
@@ -394,6 +397,24 @@ impl Box {
     }
 }
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct IntPoint {
+    pub x: i32,
+    pub y: i32,
+}
+impl IntPoint {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+        Ok(Self {
+            x: reader.read_i32::<LE>()?,
+            y: reader.read_i32::<LE>()?,
+        })
+    }
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
+        writer.write_i32::<LE>(self.x)?;
+        writer.write_i32::<LE>(self.y)?;
+        Ok(())
+    }
+}
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Text {
     pub magic: u8,
     pub value: String,
@@ -448,6 +469,7 @@ pub enum ValueBase {
     Vector(Vector),
     Vector2D(Vector2D),
     Box(Box),
+    IntPoint(IntPoint),
     Name(String),
     Str(String),
     SoftObject(String, String),
@@ -506,6 +528,7 @@ impl ValueBase {
             PropertyType::Vector => Some(ValueBase::Vector(Vector::read(reader)?)),
             PropertyType::Vector2D => Some(ValueBase::Vector2D(Vector2D::read(reader)?)),
             PropertyType::Box => Some(ValueBase::Box(Box::read(reader)?)),
+            PropertyType::IntPoint => Some(ValueBase::IntPoint(IntPoint::read(reader)?)),
             PropertyType::NameProperty => Some(ValueBase::Name(read_string(reader)?)),
             PropertyType::StrProperty => Some(ValueBase::Str(read_string(reader)?)),
             PropertyType::SoftObjectProperty => Some(ValueBase::SoftObject(
@@ -533,6 +556,7 @@ impl ValueBase {
             ValueBase::Vector(v) => v.write(writer)?,
             ValueBase::Vector2D(v) => v.write(writer)?,
             ValueBase::Box(v) => v.write(writer)?,
+            ValueBase::IntPoint(v) => v.write(writer)?,
             ValueBase::Name(v) => write_string(writer, v)?,
             ValueBase::Str(v) => write_string(writer, v)?,
             ValueBase::SoftObject(a, b) => {
