@@ -999,6 +999,13 @@ impl PropertyMeta {
                             Ok(ValueKey::Base(ValueBase::Str(read_string(r)?)))
                         })?,
                     }),
+                    PropertyType::IntProperty => Ok(PropertyMeta::Set {
+                        id,
+                        set_type,
+                        value: read_array(count, reader, |r| {
+                            Ok(ValueKey::Base(ValueBase::Int(r.read_i32::<LE>()?)))
+                        })?,
+                    }),
                     PropertyType::EnumProperty => Ok(PropertyMeta::Set {
                         id,
                         set_type,
