@@ -1457,7 +1457,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
         ];
         let mut reader = Cursor::new(&original);
-        let obj = PropertyMeta::read(PropertyType::IntProperty, &mut reader)?;
+        let obj = PropertyMeta::read(PropertyType::IntProperty, 0, &mut reader)?;
         let mut reconstructed: Vec<u8> = vec![];
         obj.write(&mut reconstructed)?;
         assert_eq!(original, &reconstructed[..]);
@@ -1480,7 +1480,7 @@ mod tests {
             0x35, 0x33, 0x31, 0x34, 0x30, 0x34, 0x30, 0x39, 0x35, 0x32, 0x30, 0x35, 0x00,
         ];
         let mut reader = Cursor::new(&original);
-        let obj = PropertyMeta::read(PropertyType::StrProperty, &mut reader)?;
+        let obj = PropertyMeta::read(PropertyType::StrProperty, 0, &mut reader)?;
         println!("{obj:#?}");
         let mut reconstructed: Vec<u8> = vec![];
         obj.write(&mut reconstructed)?;
