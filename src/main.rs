@@ -28,6 +28,10 @@ struct Edit {
 struct ActionTestResave {
     #[arg(required = true, index = 1)]
     path: String,
+
+    /// If resave fails, write input.sav and output.sav to working directory for debugging
+    #[arg(short, long)]
+    debug: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -65,7 +69,12 @@ pub fn main() -> Result<()> {
             let mut input = std::io::Cursor::new(std::fs::read(action.path)?);
             let mut output = std::io::Cursor::new(vec![]);
             Save::read(&mut input)?.write(&mut output)?;
-            if input.into_inner() != output.into_inner() {
+            let (input, output) = (input.into_inner(), output.into_inner());
+            if input != output {
+                if action.debug {
+                    std::fs::write("input.sav", input)?;
+                    std::fs::write("output.sav", output)?;
+                }
                 return Err(anyhow!("Resave did not match"));
             }
             println!("Resave successful");
