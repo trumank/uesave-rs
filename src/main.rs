@@ -4,10 +4,30 @@ use std::io::{stdin, stdout, BufRead, BufReader, BufWriter, Cursor, Write};
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 
-use uesave::Save;
+use uesave::{Save, StructType, Types};
 
 #[derive(Parser, Debug)]
-struct IO {
+struct ActionToJson {
+    #[arg(short, long, default_value = "-")]
+    input: String,
+
+    #[arg(short, long, default_value = "-")]
+    output: String,
+
+    /// Save files do not contain enough context to parse structs inside MapProperty or SetProperty.
+    /// uesave will attempt to guess, but if it is incorrect the save will fail to parse and the
+    /// type must be manually specified.
+    ///
+    /// Examples:
+    ///   -t .UnlockedItemSkins.Skins=Guid
+    ///   -t .EnemiesKilled.Key=Guid
+    ///   -t .EnemiesKilled.Value=Struct
+    #[arg(short, long, value_parser = parse_type)]
+    r#type: Vec<(String, StructType)>,
+}
+
+#[derive(Parser, Debug)]
+struct ActionFromJson {
     #[arg(short, long, default_value = "-")]
     input: String,
 
@@ -16,12 +36,23 @@ struct IO {
 }
 
 #[derive(Parser, Debug)]
-struct Edit {
+struct ActionEdit {
     #[arg(required = true, index = 1)]
     path: String,
 
     #[arg(short, long)]
     editor: Option<String>,
+
+    /// Save files do not contain enough context to parse structs inside MapProperty or SetProperty.
+    /// uesave will attempt to guess, but if it is incorrect the save will fail to parse and the
+    /// type must be manually specified.
+    ///
+    /// Examples:
+    ///   -t .UnlockedItemSkins.Skins=Guid
+    ///   -t .EnemiesKilled.Key=Guid
+    ///   -t .EnemiesKilled.Value=Struct
+    #[arg(short, long, value_parser = parse_type)]
+    r#type: Vec<(String, StructType)>,
 }
 
 #[derive(Parser, Debug)]
@@ -32,16 +63,27 @@ struct ActionTestResave {
     /// If resave fails, write input.sav and output.sav to working directory for debugging
     #[arg(short, long)]
     debug: bool,
+
+    /// Save files do not contain enough context to parse structs inside MapProperty or SetProperty.
+    /// uesave will attempt to guess, but if it is incorrect the save will fail to parse and the
+    /// type must be manually specified.
+    ///
+    /// Examples:
+    ///   -t .UnlockedItemSkins.Skins=Guid
+    ///   -t .EnemiesKilled.Key=Guid
+    ///   -t .EnemiesKilled.Value=Struct
+    #[arg(short, long, value_parser = parse_type)]
+    r#type: Vec<(String, StructType)>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Action {
     /// Convert binary save to plain text JSON
-    ToJson(IO),
+    ToJson(ActionToJson),
     /// Convert JSON back to binary save
-    FromJson(IO),
+    FromJson(ActionFromJson),
     /// Launch $EDITOR to edit a save file as JSON in place
-    Edit(Edit),
+    Edit(ActionEdit),
     /// Test resave
     TestResave(ActionTestResave),
 }
@@ -53,22 +95,40 @@ struct Args {
     action: Action,
 }
 
+fn parse_type(t: &str) -> Result<(String, StructType)> {
+    if let Some((l, r)) = t.rsplit_once('=') {
+        Ok((l.to_owned(), r.into()))
+    } else {
+        Err(anyhow!("Malformed type"))
+    }
+}
+
 pub fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.action {
-        Action::ToJson(io) => {
-            let save = Save::read(&mut input(&io.input)?)?;
-            serde_json::to_writer_pretty(output(&io.output)?, &save)?;
+        Action::ToJson(action) => {
+            let mut types = Types::new();
+            for (path, t) in action.r#type {
+                types.add(path, t);
+            }
+
+            let save = Save::read_with_types(&mut input(&action.input)?, &types)?;
+            serde_json::to_writer_pretty(output(&action.output)?, &save)?;
         }
         Action::FromJson(io) => {
             let save: Save = serde_json::from_reader(&mut input(&io.input)?)?;
             save.write(&mut output(&io.output)?)?;
         }
         Action::TestResave(action) => {
+            let mut types = Types::new();
+            for (path, t) in action.r#type {
+                types.add(path, t);
+            }
+
             let mut input = std::io::Cursor::new(std::fs::read(action.path)?);
             let mut output = std::io::Cursor::new(vec![]);
-            Save::read(&mut input)?.write(&mut output)?;
+            Save::read_with_types(&mut input, &types)?.write(&mut output)?;
             let (input, output) = (input.into_inner(), output.into_inner());
             if input != output {
                 if action.debug {
@@ -79,15 +139,20 @@ pub fn main() -> Result<()> {
             }
             println!("Resave successful");
         }
-        Action::Edit(edit) => {
-            let editor = match edit.editor {
+        Action::Edit(action) => {
+            let editor = match action.editor {
                 Some(editor) => editor,
                 None => std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string()),
             };
 
+            let mut types = Types::new();
+            for (path, t) in action.r#type {
+                types.add(path, t);
+            }
+
             // read and parse save file
-            let buffer = std::fs::read(&edit.path)?;
-            let save = Save::read(&mut Cursor::new(&buffer))?;
+            let buffer = std::fs::read(&action.path)?;
+            let save = Save::read_with_types(&mut Cursor::new(&buffer), &types)?;
             let value = serde_json::to_value(save)?;
 
             // create temp file and write formatted JSON to it
@@ -118,7 +183,7 @@ pub fn main() -> Result<()> {
                     .create(true)
                     .truncate(true)
                     .write(true)
-                    .open(edit.path)?
+                    .open(action.path)?
                     .write_all(&out_buffer)?;
             }
         }
