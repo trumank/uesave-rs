@@ -1290,6 +1290,7 @@ impl<W: Write> Writable<W> for CustomFormatData {
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Header {
+    pub magic: u32,
     pub save_game_version: u32,
     pub package_version: u32,
     pub engine_version_major: u16,
@@ -1302,10 +1303,16 @@ pub struct Header {
 }
 impl<R: Read> Readable<R> for Header {
     fn read(reader: &mut R) -> TResult<Self> {
-        if reader.read_u32::<LE>()? != u32::from_le_bytes(*b"GVAS") {
-            return Err(crate::error::Error::BadMagic());
+        let magic = reader.read_u32::<LE>()?;
+        if magic != u32::from_le_bytes(*b"GVAS") {
+            eprintln!(
+                "Found non-standard magic: {:02x?} ({}) expected: GVAS, continuing to parse...",
+                &magic.to_le_bytes(),
+                String::from_utf8_lossy(&magic.to_le_bytes())
+            );
         }
         Ok(Header {
+            magic,
             save_game_version: reader.read_u32::<LE>()?,
             package_version: reader.read_u32::<LE>()?,
             engine_version_major: reader.read_u16::<LE>()?,
@@ -1320,7 +1327,7 @@ impl<R: Read> Readable<R> for Header {
 }
 impl<W: Write> Writable<W> for Header {
     fn write(&self, writer: &mut W) -> TResult<()> {
-        writer.write_u32::<LE>(u32::from_le_bytes(*b"GVAS"))?;
+        writer.write_u32::<LE>(self.magic)?;
         writer.write_u32::<LE>(self.save_game_version)?;
         writer.write_u32::<LE>(self.package_version)?;
         writer.write_u16::<LE>(self.engine_version_major)?;
@@ -1360,17 +1367,30 @@ impl Root {
 pub struct Save {
     pub header: Header,
     pub root: Root,
+    pub extra: Vec<u8>,
 }
 impl Save {
     pub fn read<R: Read>(reader: &mut R) -> TResult<Self> {
-        let header = Header::read(reader)?;
-        let root = Root::read(reader)?;
-        Ok(Self { header, root })
+        Ok(Self {
+            header: Header::read(reader)?,
+            root: Root::read(reader)?,
+            extra: {
+                let mut buf = vec![];
+                reader.read_to_end(&mut buf)?;
+                if buf != [0; 4] {
+                    eprintln!(
+                        "{} extra bytes. Save may not have been parsed completely.",
+                        buf.len()
+                    );
+                }
+                buf
+            },
+        })
     }
     pub fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         self.header.write(writer)?;
         self.root.write(writer)?;
-        writer.write_u32::<LE>(0)?;
+        writer.write_all(&self.extra)?;
         Ok(())
     }
 }
