@@ -599,12 +599,10 @@ impl ValueKey {
     ) -> TResult<ValueKey> {
         Ok(if let Some(base) = ValueBase::read(t, reader)? {
             ValueKey::Base(base)
+        } else if id.is_some() {
+            ValueKey::Struct(read_properties_until_none(reader)?)
         } else {
-            if id.is_some() {
-                ValueKey::Struct(read_properties_until_none(reader)?)
-            } else {
-                ValueKey::StructKey(uuid::Uuid::read(reader)?)
-            }
+            ValueKey::StructKey(uuid::Uuid::read(reader)?)
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
@@ -639,12 +637,12 @@ impl ValueArray {
                     })?))
                 } else {
                     ValueArray::Byte(ByteArray::Label(read_array(count, reader, |r| {
-                        Ok(read_string(r)?)
+                        read_string(r)
                     })?))
                 }
             }
             PropertyType::EnumProperty => {
-                ValueArray::Enum(read_array(count, reader, |r| Ok(read_string(r)?))?)
+                ValueArray::Enum(read_array(count, reader, |r| read_string(r))?)
             }
             PropertyType::StrProperty => ValueArray::Str(read_array(count, reader, read_string)?),
             PropertyType::SoftObjectProperty => {
@@ -1036,7 +1034,7 @@ impl PropertyMeta {
                     PropertyType::ByteProperty => {
                         // byte property could be a single byte or a string representing an enum
                         // check which it is based on the size of the property
-                        let value = if size == (8 + count * 1).into() {
+                        let value = if size == (8 + count).into() {
                             read_array(count, reader, |r| {
                                 Ok(ValueKey::Base(ValueBase::Byte(Byte::Byte(r.read_u8()?))))
                             })?
@@ -1054,7 +1052,7 @@ impl PropertyMeta {
                             value,
                         })
                     }
-                    _ => return Err(crate::error::Error::UnknownSetType(format!("{set_type:?}"))),
+                    _ => Err(crate::error::Error::UnknownSetType(format!("{set_type:?}"))),
                 }
             }
             PropertyType::MapProperty => {
@@ -1097,7 +1095,7 @@ impl PropertyMeta {
                     value,
                 })
             }
-            _ => return Err(crate::error::Error::UnknownPropertyMeta(format!("{t:?}"))),
+            _ => Err(crate::error::Error::UnknownPropertyMeta(format!("{t:?}"))),
         }
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<usize> {

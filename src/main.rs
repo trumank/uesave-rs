@@ -89,7 +89,7 @@ pub fn main() -> Result<()> {
             let mut args = shell_words::split(&editor)
                 .expect("failed to parse EDITOR")
                 .into_iter();
-            std::process::Command::new(&args.next().expect("EDITOR empty"))
+            std::process::Command::new(args.next().expect("EDITOR empty"))
                 .args(args)
                 .arg("--")
                 .arg(temp.path())
