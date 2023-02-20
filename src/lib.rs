@@ -634,9 +634,13 @@ impl ValueArray {
             }
             PropertyType::ByteProperty => {
                 if size == (4 + count).into() {
-                    ValueArray::Byte(ByteArray::Byte(read_array(count, reader, |r| Ok(r.read_u8()?))?))
+                    ValueArray::Byte(ByteArray::Byte(read_array(count, reader, |r| {
+                        Ok(r.read_u8()?)
+                    })?))
                 } else {
-                    ValueArray::Byte(ByteArray::Label(read_array(count, reader, |r| Ok(read_string(r)?))?))
+                    ValueArray::Byte(ByteArray::Label(read_array(count, reader, |r| {
+                        Ok(read_string(r)?)
+                    })?))
                 }
             }
             PropertyType::EnumProperty => {
@@ -701,22 +705,20 @@ impl ValueArray {
                     writer.write_f32::<LE>(*i)?;
                 }
             }
-            ValueArray::Byte(v) => {
-                match v {
-                    ByteArray::Byte(b) => {
-                        writer.write_u32::<LE>(b.len() as u32)?;
-                        for b in b {
-                            writer.write_u8(*b)?;
-                        }
-                    }
-                    ByteArray::Label(l) => {
-                        writer.write_u32::<LE>(l.len() as u32)?;
-                        for l in l {
-                            write_string(writer, l)?;
-                        }
+            ValueArray::Byte(v) => match v {
+                ByteArray::Byte(b) => {
+                    writer.write_u32::<LE>(b.len() as u32)?;
+                    for b in b {
+                        writer.write_u8(*b)?;
                     }
                 }
-            }
+                ByteArray::Label(l) => {
+                    writer.write_u32::<LE>(l.len() as u32)?;
+                    for l in l {
+                        write_string(writer, l)?;
+                    }
+                }
+            },
             ValueArray::Enum(v) => {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
