@@ -1012,6 +1012,13 @@ impl PropertyMeta {
                             Ok(ValueKey::Base(ValueBase::Str(read_string(r)?)))
                         })?,
                     }),
+                    PropertyType::NameProperty => Ok(PropertyMeta::Set {
+                        id,
+                        set_type,
+                        value: read_array(count, reader, |r| {
+                            Ok(ValueKey::Base(ValueBase::Name(read_string(r)?)))
+                        })?,
+                    }),
                     PropertyType::IntProperty => Ok(PropertyMeta::Set {
                         id,
                         set_type,
