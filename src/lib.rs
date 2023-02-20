@@ -219,9 +219,10 @@ impl MapEntry {
     fn read<R: Read>(
         key_type: &PropertyType,
         value_type: &PropertyType,
+        id: Option<uuid::Uuid>,
         reader: &mut R,
     ) -> TResult<MapEntry> {
-        let key = ValueKey::read(key_type, reader)?;
+        let key = ValueKey::read(key_type, id, reader)?;
         let value = ValueStruct::read(value_type, reader)?;
         Ok(Self { key, value })
     }
@@ -486,7 +487,8 @@ pub enum ValueStruct {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ValueKey {
     Base(ValueBase),
-    Struct(StructKey),
+    StructKey(StructKey),
+    Struct(Vec<Property>),
 }
 
 // Array of values used by ArrayProperty
@@ -590,17 +592,26 @@ impl ValueStruct {
     }
 }
 impl ValueKey {
-    fn read<R: Read>(t: &PropertyType, reader: &mut R) -> TResult<ValueKey> {
+    fn read<R: Read>(
+        t: &PropertyType,
+        id: Option<uuid::Uuid>,
+        reader: &mut R,
+    ) -> TResult<ValueKey> {
         Ok(if let Some(base) = ValueBase::read(t, reader)? {
             ValueKey::Base(base)
         } else {
-            ValueKey::Struct(uuid::Uuid::read(reader)?)
+            if id.is_some() {
+                ValueKey::Struct(read_properties_until_none(reader)?)
+            } else {
+                ValueKey::StructKey(uuid::Uuid::read(reader)?)
+            }
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         match self {
             ValueKey::Base(v) => v.write(writer)?,
-            ValueKey::Struct(v) => v.write(writer)?,
+            ValueKey::StructKey(v) => v.write(writer)?,
+            ValueKey::Struct(v) => write_properties_none_terminated(writer, v)?,
         }
         Ok(())
     }
@@ -1045,7 +1056,7 @@ impl PropertyMeta {
                 let count = reader.read_u32::<LE>()?;
                 let mut value = vec![];
                 for _ in 0..count {
-                    value.push(MapEntry::read(&key_type, &value_type, reader)?)
+                    value.push(MapEntry::read(&key_type, &value_type, id, reader)?)
                 }
                 Ok(PropertyMeta::Map {
                     key_type,
