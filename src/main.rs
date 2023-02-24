@@ -1,4 +1,4 @@
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{stdin, stdout, BufRead, BufReader, BufWriter, Cursor, Write};
 
 use anyhow::{anyhow, Result};
@@ -40,9 +40,6 @@ struct ActionEdit {
     #[arg(required = true, index = 1)]
     path: String,
 
-    #[arg(short, long)]
-    editor: Option<String>,
-
     /// Save files do not contain enough context to parse structs inside MapProperty or SetProperty.
     /// uesave will attempt to guess, but if it is incorrect the save will fail to parse and the
     /// type must be manually specified.
@@ -82,7 +79,7 @@ enum Action {
     ToJson(ActionToJson),
     /// Convert JSON back to binary save
     FromJson(ActionFromJson),
-    /// Launch $EDITOR to edit a save file as JSON in place
+    /// Launch editor to edit a save file as JSON in place
     Edit(ActionEdit),
     /// Test resave
     TestResave(ActionTestResave),
@@ -126,65 +123,42 @@ pub fn main() -> Result<()> {
                 types.add(path, t);
             }
 
-            let mut input = std::io::Cursor::new(std::fs::read(action.path)?);
+            let mut input = std::io::Cursor::new(fs::read(action.path)?);
             let mut output = std::io::Cursor::new(vec![]);
             Save::read_with_types(&mut input, &types)?.write(&mut output)?;
             let (input, output) = (input.into_inner(), output.into_inner());
             if input != output {
                 if action.debug {
-                    std::fs::write("input.sav", input)?;
-                    std::fs::write("output.sav", output)?;
+                    fs::write("input.sav", input)?;
+                    fs::write("output.sav", output)?;
                 }
                 return Err(anyhow!("Resave did not match"));
             }
             println!("Resave successful");
         }
         Action::Edit(action) => {
-            let editor = match action.editor {
-                Some(editor) => editor,
-                None => std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string()),
-            };
-
             let mut types = Types::new();
             for (path, t) in action.r#type {
                 types.add(path, t);
             }
 
-            // read and parse save file
-            let buffer = std::fs::read(&action.path)?;
-            let save = Save::read_with_types(&mut Cursor::new(&buffer), &types)?;
-            let value = serde_json::to_value(save)?;
+            let save = Save::read_with_types(&mut Cursor::new(fs::read(&action.path)?), &types)?;
+            let modified_save: Save = serde_json::from_slice(&edit::edit_bytes_with_builder(
+                serde_json::to_vec_pretty(&save)?,
+                tempfile::Builder::new().suffix(".json"),
+            )?)?;
 
-            // create temp file and write formatted JSON to it
-            let temp = tempfile::Builder::new().suffix(".json").tempfile()?;
-            serde_json::to_writer_pretty(BufWriter::new(&temp), &value)?;
-
-            // launch editor
-            let mut args = shell_words::split(&editor)
-                .expect("failed to parse EDITOR")
-                .into_iter();
-            std::process::Command::new(args.next().expect("EDITOR empty"))
-                .args(args)
-                .arg("--")
-                .arg(temp.path())
-                .stdin(std::process::Stdio::piped())
-                .spawn()?
-                .wait()?;
-
-            // rebuild save if modified
-            let modified_save: Save = serde_json::from_reader(BufReader::new(temp.reopen()?))?;
-            let mut out_buffer = vec![];
-            modified_save.write(&mut out_buffer)?;
-            if buffer == out_buffer {
+            if save == modified_save {
                 println!("File unchanged, doing nothing.");
             } else {
                 println!("File modified, writing new save.");
-                OpenOptions::new()
-                    .create(true)
-                    .truncate(true)
-                    .write(true)
-                    .open(action.path)?
-                    .write_all(&out_buffer)?;
+                modified_save.write(&mut BufWriter::new(
+                    OpenOptions::new()
+                        .create(true)
+                        .truncate(true)
+                        .write(true)
+                        .open(action.path)?,
+                ))?;
             }
         }
     }
