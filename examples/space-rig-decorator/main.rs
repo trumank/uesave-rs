@@ -2,38 +2,38 @@ use std::fs::File;
 
 use anyhow::Result;
 
-use uesave::{PropertyMeta, Save, StructValue, ValueArray};
+use uesave::{Property, Save, StructValue, ValueArray};
 
 #[rustfmt::skip]
 fn main() -> Result<()> {
     let save = Save::read(&mut File::open(
         "examples/space-rig-decorator/PropPack.sav",
     )?)?;
-    let props = &save.root.root[0].value;
-    if let PropertyMeta::Array { value: ValueArray::Struct { value, .. }, .. } = props {
+    let props = &save.root.properties["PropList"];
+    if let Property::Array { value: ValueArray::Struct { value, .. }, .. } = props {
         for prop in value {
             if let StructValue::Struct(p) = prop {
-                if let PropertyMeta::Struct { value: StructValue::Struct(value), .. } = &p[0].value {
-                    if let PropertyMeta::Struct { value: StructValue::Quat(value) , .. } = &value[0].value {
+                if let Property::Struct { value: StructValue::Struct(value), .. } = &p["PropPosition_7_B8CD81CD4E138D8E06FBBA8056FE4C85"] {
+                    if let Property::Struct { value: StructValue::Quat(value) , .. } = &value["Rotation"] {
                         print!("{}:{}:{}:{}:", value.x, value.y, value.z, value.w);
                     }
-                    if let PropertyMeta::Struct { value: StructValue::Vector(value), .. } = &value[1].value {
+                    if let Property::Struct { value: StructValue::Vector(value), .. } = &value["Translation"] {
                         print!("{}:{}:{}:", value.x, value.y, value.z);
                     }
-                    if let PropertyMeta::Struct { value: StructValue::Vector(value), .. } = &value[2].value {
+                    if let Property::Struct { value: StructValue::Vector(value), .. } = &value["Scale3D"] {
                         print!("{}:{}:{}:", value.x, value.y, value.z);
                     }
                 }
-                if let PropertyMeta::Str { value, .. } = &p[1].value {
+                if let Property::Str { value, .. } = &p["PropName_10_4BB2A20D47DA97D8ECB7D888147BBB97"] {
                     print!("{value}:");
                 }
-                if let PropertyMeta::Bool { value, .. } = &p[2].value {
+                if let Property::Bool { value, .. } = &p["IsStaticMesh_20_AB977B2F47FD519F53FB8CB85490631B"] {
                     print!("{value}:");
                 }
-                if let PropertyMeta::Object { value, .. } = &p[3].value {
+                if let Property::Object { value, .. } = &p["DynamicPropClass_19_AA6C35BE4D24AB6B42E8999E55661065"] {
                     print!("{value}:");
                 }
-                if let PropertyMeta::Object { value, .. } = &p[4].value {
+                if let Property::Object { value, .. } = &p["StaticMesh_18_BAF2BF524DA3EA4A985B9D87B727223A"] {
                     println!("{value}");
                 }
             }

@@ -49,26 +49,54 @@ fn write_string<W: Write>(writer: &mut W, string: &str) -> TResult<()> {
     }
     Ok(())
 }
-fn read_properties_until_none<R: Read>(
-    context: &Context,
-    reader: &mut R,
-) -> TResult<Vec<Property>> {
-    let mut properties = vec![];
-    while let Some(prop) = Property::read(context, reader)? {
-        properties.push(prop);
+
+type Properties = indexmap::IndexMap<String, Property>;
+
+fn read_properties_until_none<R: Read>(context: &Context, reader: &mut R) -> TResult<Properties> {
+    let mut properties = Properties::new();
+    while let Some((name, prop)) = read_property(context, reader)? {
+        properties.insert(name, prop);
     }
     Ok(properties)
 }
 fn write_properties_none_terminated<W: Write>(
     writer: &mut W,
-    properties: &Vec<Property>,
+    properties: &Properties,
 ) -> TResult<()> {
     for p in properties {
-        p.write(writer)?;
+        write_property(p, writer)?;
     }
     write_string(writer, "None")?;
     Ok(())
 }
+
+fn read_property<R: Read>(
+    context: &Context,
+    reader: &mut R,
+) -> TResult<Option<(String, Property)>> {
+    let name = read_string(reader)?;
+    if name == "None" {
+        Ok(None)
+    } else {
+        let context = context.push(&name);
+        let t = PropertyType::read(reader)?;
+        let size = reader.read_u64::<LE>()?;
+        let value = Property::read(&context, t, size, reader)?;
+        Ok(Some((name, value)))
+    }
+}
+fn write_property<W: Write>(prop: (&String, &Property), writer: &mut W) -> TResult<()> {
+    write_string(writer, prop.0)?;
+    prop.1.get_type().write(writer)?;
+
+    let mut buf = vec![];
+    let size = prop.1.write(&mut buf)?;
+
+    writer.write_u64::<LE>(size as u64)?;
+    writer.write_all(&buf[..])?;
+    Ok(())
+}
+
 fn read_array<T, F, R: Read>(length: u32, reader: &mut R, f: F) -> TResult<Vec<T>>
 where
     F: Fn(&mut R) -> TResult<T>,
@@ -582,7 +610,7 @@ pub enum StructValue {
     Quat(Quat),
     LinearColor(LinearColor),
     Rotator(Rotator),
-    Struct(Vec<Property>),
+    Struct(Properties),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -906,7 +934,7 @@ impl ValueSet {
 
 // Values with IDs present in the top level object and StructProperty
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum PropertyMeta {
+pub enum Property {
     Int {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
@@ -1003,61 +1031,28 @@ pub enum PropertyMeta {
     },
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Property {
-    pub name: String,
-    pub value: PropertyMeta,
-}
-
 impl Property {
-    fn read<R: Read>(context: &Context, reader: &mut R) -> TResult<Option<Property>> {
-        let name = read_string(reader)?;
-        if name == "None" {
-            Ok(None)
-        } else {
-            let context = context.push(&name);
-            let t = PropertyType::read(reader)?;
-            let size = reader.read_u64::<LE>()?;
-            let value = PropertyMeta::read(&context, t, size, reader)?;
-            Ok(Some(Property { name, value }))
-        }
-    }
-    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        write_string(writer, &self.name)?;
-        self.value.get_type().write(writer)?;
-
-        let mut buf = vec![];
-        let size = self.value.write(&mut buf)?;
-
-        //writer.write_u64::<LE>(buf.len() as u64)?;
-        writer.write_u64::<LE>(size as u64)?;
-        writer.write_all(&buf[..])?;
-        Ok(())
-    }
-}
-
-impl PropertyMeta {
     fn get_type(&self) -> PropertyType {
         match &self {
-            PropertyMeta::Int { .. } => PropertyType::IntProperty,
-            PropertyMeta::Int64 { .. } => PropertyType::Int64Property,
-            PropertyMeta::UInt32 { .. } => PropertyType::UInt32Property,
-            PropertyMeta::Float { .. } => PropertyType::FloatProperty,
-            PropertyMeta::Bool { .. } => PropertyType::BoolProperty,
-            PropertyMeta::Byte { .. } => PropertyType::ByteProperty,
-            PropertyMeta::Enum { .. } => PropertyType::EnumProperty,
-            PropertyMeta::Name { .. } => PropertyType::NameProperty,
-            PropertyMeta::Str { .. } => PropertyType::StrProperty,
-            PropertyMeta::SoftObject { .. } => PropertyType::SoftObjectProperty,
-            PropertyMeta::Object { .. } => PropertyType::ObjectProperty,
-            PropertyMeta::Text { .. } => PropertyType::TextProperty,
-            PropertyMeta::MulticastInlineDelegate { .. } => {
+            Property::Int { .. } => PropertyType::IntProperty,
+            Property::Int64 { .. } => PropertyType::Int64Property,
+            Property::UInt32 { .. } => PropertyType::UInt32Property,
+            Property::Float { .. } => PropertyType::FloatProperty,
+            Property::Bool { .. } => PropertyType::BoolProperty,
+            Property::Byte { .. } => PropertyType::ByteProperty,
+            Property::Enum { .. } => PropertyType::EnumProperty,
+            Property::Name { .. } => PropertyType::NameProperty,
+            Property::Str { .. } => PropertyType::StrProperty,
+            Property::SoftObject { .. } => PropertyType::SoftObjectProperty,
+            Property::Object { .. } => PropertyType::ObjectProperty,
+            Property::Text { .. } => PropertyType::TextProperty,
+            Property::MulticastInlineDelegate { .. } => {
                 PropertyType::MulticastInlineDelegateProperty
             }
-            PropertyMeta::Set { .. } => PropertyType::SetProperty,
-            PropertyMeta::Map { .. } => PropertyType::MapProperty,
-            PropertyMeta::Struct { .. } => PropertyType::StructProperty,
-            PropertyMeta::Array { .. } => PropertyType::ArrayProperty,
+            Property::Set { .. } => PropertyType::SetProperty,
+            Property::Map { .. } => PropertyType::MapProperty,
+            Property::Struct { .. } => PropertyType::StructProperty,
+            Property::Array { .. } => PropertyType::ArrayProperty,
         }
     }
     fn read<R: Read>(
@@ -1065,25 +1060,25 @@ impl PropertyMeta {
         t: PropertyType,
         size: u64,
         reader: &mut R,
-    ) -> TResult<PropertyMeta> {
+    ) -> TResult<Property> {
         match t {
-            PropertyType::IntProperty => Ok(PropertyMeta::Int {
+            PropertyType::IntProperty => Ok(Property::Int {
                 id: read_optional_uuid(reader)?,
                 value: reader.read_i32::<LE>()?,
             }),
-            PropertyType::Int64Property => Ok(PropertyMeta::Int64 {
+            PropertyType::Int64Property => Ok(Property::Int64 {
                 id: read_optional_uuid(reader)?,
                 value: reader.read_i64::<LE>()?,
             }),
-            PropertyType::UInt32Property => Ok(PropertyMeta::UInt32 {
+            PropertyType::UInt32Property => Ok(Property::UInt32 {
                 id: read_optional_uuid(reader)?,
                 value: reader.read_u32::<LE>()?,
             }),
-            PropertyType::FloatProperty => Ok(PropertyMeta::Float {
+            PropertyType::FloatProperty => Ok(Property::Float {
                 id: read_optional_uuid(reader)?,
                 value: reader.read_f32::<LE>()?,
             }),
-            PropertyType::BoolProperty => Ok(PropertyMeta::Bool {
+            PropertyType::BoolProperty => Ok(Property::Bool {
                 value: reader.read_u8()? > 0,
                 id: read_optional_uuid(reader)?,
             }),
@@ -1095,40 +1090,40 @@ impl PropertyMeta {
                 } else {
                     Byte::Label(read_string(reader)?)
                 };
-                PropertyMeta::Byte {
+                Property::Byte {
                     enum_type,
                     id,
                     value,
                 }
             }),
-            PropertyType::EnumProperty => Ok(PropertyMeta::Enum {
+            PropertyType::EnumProperty => Ok(Property::Enum {
                 enum_type: read_string(reader)?,
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
             }),
-            PropertyType::NameProperty => Ok(PropertyMeta::Name {
+            PropertyType::NameProperty => Ok(Property::Name {
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
             }),
-            PropertyType::StrProperty => Ok(PropertyMeta::Str {
+            PropertyType::StrProperty => Ok(Property::Str {
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
             }),
-            PropertyType::SoftObjectProperty => Ok(PropertyMeta::SoftObject {
+            PropertyType::SoftObjectProperty => Ok(Property::SoftObject {
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
                 value2: read_string(reader)?,
             }),
-            PropertyType::ObjectProperty => Ok(PropertyMeta::Object {
+            PropertyType::ObjectProperty => Ok(Property::Object {
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
             }),
-            PropertyType::TextProperty => Ok(PropertyMeta::Text {
+            PropertyType::TextProperty => Ok(Property::Text {
                 id: read_optional_uuid(reader)?,
                 value: Text::read(reader)?,
             }),
             PropertyType::MulticastInlineDelegateProperty => {
-                Ok(PropertyMeta::MulticastInlineDelegate {
+                Ok(Property::MulticastInlineDelegate {
                     id: read_optional_uuid(reader)?,
                     value: MulticastInlineDelegate::read(reader)?,
                 })
@@ -1142,7 +1137,7 @@ impl PropertyMeta {
                     _ => None,
                 };
                 let value = ValueSet::read(context, &set_type, struct_type, size - 8, reader)?;
-                Ok(PropertyMeta::Set {
+                Ok(Property::Set {
                     id,
                     set_type,
                     value,
@@ -1185,7 +1180,7 @@ impl PropertyMeta {
                         reader,
                     )?)
                 }
-                Ok(PropertyMeta::Map {
+                Ok(Property::Map {
                     key_type,
                     value_type,
                     id,
@@ -1197,7 +1192,7 @@ impl PropertyMeta {
                 let struct_id = uuid::Uuid::read(reader)?;
                 let id = read_optional_uuid(reader)?;
                 let value = StructValue::read(context, &struct_type, reader)?;
-                Ok(PropertyMeta::Struct {
+                Ok(Property::Struct {
                     struct_type,
                     struct_id,
                     id,
@@ -1209,7 +1204,7 @@ impl PropertyMeta {
                 let id = read_optional_uuid(reader)?;
                 let value = ValueArray::read(context, &array_type, size - 4, reader)?;
 
-                Ok(PropertyMeta::Array {
+                Ok(Property::Array {
                     array_type,
                     id,
                     value,
@@ -1219,32 +1214,32 @@ impl PropertyMeta {
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<usize> {
         Ok(match self {
-            PropertyMeta::Int { id, value } => {
+            Property::Int { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 writer.write_i32::<LE>(*value)?;
                 4
             }
-            PropertyMeta::Int64 { id, value } => {
+            Property::Int64 { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 writer.write_i64::<LE>(*value)?;
                 8
             }
-            PropertyMeta::UInt32 { id, value } => {
+            Property::UInt32 { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 writer.write_u32::<LE>(*value)?;
                 4
             }
-            PropertyMeta::Float { id, value } => {
+            Property::Float { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 writer.write_f32::<LE>(*value)?;
                 4
             }
-            PropertyMeta::Bool { id, value } => {
+            Property::Bool { id, value } => {
                 writer.write_u8(u8::from(*value))?;
                 write_optional_uuid(writer, *id)?;
                 0
             }
-            PropertyMeta::Byte {
+            Property::Byte {
                 enum_type,
                 id,
                 value,
@@ -1262,7 +1257,7 @@ impl PropertyMeta {
                     }
                 }
             }
-            PropertyMeta::Enum {
+            Property::Enum {
                 enum_type,
                 id,
                 value,
@@ -1272,7 +1267,7 @@ impl PropertyMeta {
                 write_string(writer, value)?;
                 value.len() + 5
             }
-            PropertyMeta::Name { id, value } => {
+            Property::Name { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 write_string(&mut buf, value)?;
@@ -1280,7 +1275,7 @@ impl PropertyMeta {
                 writer.write_all(&buf)?;
                 size
             }
-            PropertyMeta::Str { id, value } => {
+            Property::Str { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 write_string(&mut buf, value)?;
@@ -1288,7 +1283,7 @@ impl PropertyMeta {
                 writer.write_all(&buf)?;
                 size
             }
-            PropertyMeta::SoftObject { id, value, value2 } => {
+            Property::SoftObject { id, value, value2 } => {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 write_string(&mut buf, value)?;
@@ -1297,7 +1292,7 @@ impl PropertyMeta {
                 writer.write_all(&buf)?;
                 size
             }
-            PropertyMeta::Object { id, value } => {
+            Property::Object { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 write_string(&mut buf, value)?;
@@ -1305,12 +1300,12 @@ impl PropertyMeta {
                 writer.write_all(&buf)?;
                 size
             }
-            PropertyMeta::Text { id, /* value */ .. } => {
+            Property::Text { id, /* value */ .. } => {
                 write_optional_uuid(writer, *id)?;
-                todo!("TODO: write PropertyMeta::Text");
+                todo!("TODO: write Property::Text");
                 //write_string(writer, value)?;
             }
-            PropertyMeta::MulticastInlineDelegate { id, value } => {
+            Property::MulticastInlineDelegate { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 value.write(&mut buf)?;
@@ -1318,7 +1313,7 @@ impl PropertyMeta {
                 writer.write_all(&buf)?;
                 size
             }
-            PropertyMeta::Set {
+            Property::Set {
                 id,
                 set_type,
                 value,
@@ -1332,7 +1327,7 @@ impl PropertyMeta {
                 writer.write_all(&buf)?;
                 size
             }
-            PropertyMeta::Map {
+            Property::Map {
                 key_type,
                 value_type,
                 id,
@@ -1351,7 +1346,7 @@ impl PropertyMeta {
                 writer.write_all(&buf)?;
                 size
             }
-            PropertyMeta::Struct {
+            Property::Struct {
                 struct_type,
                 struct_id,
                 id,
@@ -1366,7 +1361,7 @@ impl PropertyMeta {
                 writer.write_all(&buf)?;
                 size
             }
-            PropertyMeta::Array {
+            Property::Array {
                 array_type,
                 id,
                 value,
@@ -1463,18 +1458,18 @@ impl<W: Write> Writable<W> for Header {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Root {
     pub save_game_type: String,
-    pub root: Vec<Property>,
+    pub properties: Properties,
 }
 impl Root {
     fn read<R: Read>(context: &Context, reader: &mut R) -> TResult<Self> {
         Ok(Self {
             save_game_type: read_string(reader)?,
-            root: read_properties_until_none(context, reader)?,
+            properties: read_properties_until_none(context, reader)?,
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         write_string(writer, &self.save_game_type)?;
-        write_properties_none_terminated(writer, &self.root)?;
+        write_properties_none_terminated(writer, &self.properties)?;
         Ok(())
     }
 }
@@ -1656,13 +1651,13 @@ mod tests {
         let mut reader = Cursor::new(&original);
         let types = Types::new();
         let ctx = Context::new(&types);
-        let obj = PropertyMeta::read(&ctx, PropertyType::IntProperty, 0, &mut reader)?;
+        let obj = Property::read(&ctx, PropertyType::IntProperty, 0, &mut reader)?;
         let mut reconstructed: Vec<u8> = vec![];
         obj.write(&mut reconstructed)?;
         assert_eq!(original, &reconstructed[..]);
         assert_eq!(
             obj,
-            PropertyMeta::Int {
+            Property::Int {
                 id: Some(uuid::uuid!("00000000000000000000000000000000")),
                 value: 10
             }
@@ -1681,7 +1676,7 @@ mod tests {
         let mut reader = Cursor::new(&original);
         let types = Types::new();
         let ctx = Context::new(&types);
-        let obj = PropertyMeta::read(&ctx, PropertyType::StrProperty, 0, &mut reader)?;
+        let obj = Property::read(&ctx, PropertyType::StrProperty, 0, &mut reader)?;
         println!("{obj:#?}");
         let mut reconstructed: Vec<u8> = vec![];
         obj.write(&mut reconstructed)?;
@@ -1701,11 +1696,11 @@ mod tests {
         let types = Types::new();
         let ctx = Context::new(&types);
         assert_eq!(
-            Property::read(&ctx, &mut reader)?,
-            Some(Property {
-                name: "VersionNumber".to_string(),
-                value: PropertyMeta::Int { id: None, value: 2 }
-            })
+            read_property(&ctx, &mut reader)?,
+            Some((
+                "VersionNumber".to_string(),
+                Property::Int { id: None, value: 2 }
+            ))
         );
         Ok(())
     }
@@ -1735,38 +1730,38 @@ mod tests {
         let types = Types::new();
         let ctx = Context::new(&types);
         assert_eq!(
-            Property::read(&ctx, &mut reader)?,
-            Some(Property {
-                name: "VanityMasterySave".to_string(),
-                value: PropertyMeta::Struct {
+            read_property(&ctx, &mut reader)?,
+            Some((
+                "VanityMasterySave".to_string(),
+                Property::Struct {
                     id: None,
-                    value: StructValue::Struct(vec![
-                        Property {
-                            name: "Level".to_string(),
-                            value: PropertyMeta::Int {
+                    value: StructValue::Struct(indexmap::IndexMap::from([
+                        (
+                            "Level".to_string(),
+                            Property::Int {
                                 id: None,
                                 value: 140,
-                            },
-                        },
-                        Property {
-                            name: "XP".to_string(),
-                            value: PropertyMeta::Int {
+                            }
+                        ),
+                        (
+                            "XP".to_string(),
+                            Property::Int {
                                 id: None,
                                 value: 9018,
                             },
-                        },
-                        Property {
-                            name: "HasAwardedForOldPurchases".to_string(),
-                            value: PropertyMeta::Bool {
+                        ),
+                        (
+                            "HasAwardedForOldPurchases".to_string(),
+                            Property::Bool {
                                 id: None,
                                 value: true,
                             },
-                        },
-                    ]),
+                        ),
+                    ])),
                     struct_type: StructType::Struct(Some("VanityMasterySave".to_string())),
                     struct_id: uuid::uuid!("00000000000000000000000000000000"),
                 }
-            })
+            ))
         );
         Ok(())
     }
@@ -1784,15 +1779,15 @@ mod tests {
         let types = Types::new();
         let ctx = Context::new(&types);
         assert_eq!(
-            Property::read(&ctx, &mut reader)?,
-            Some(Property {
-                name: "StatIndices".to_string(),
-                value: PropertyMeta::Array {
+            read_property(&ctx, &mut reader)?,
+            Some((
+                "StatIndices".to_string(),
+                Property::Array {
                     array_type: PropertyType::IntProperty,
                     id: None,
                     value: ValueArray::Base(ValueVec::Int(vec![0]))
                 }
-            })
+            ))
         );
         Ok(())
     }
@@ -1808,10 +1803,10 @@ mod tests {
         let mut reader = Cursor::new(&original);
         let types = Types::new();
         let ctx = Context::new(&types);
-        let property = Property::read(&ctx, &mut reader)?.unwrap();
+        let property = read_property(&ctx, &mut reader)?.unwrap();
         println!("{property:#?}");
         let mut reconstructed: Vec<u8> = vec![];
-        property.write(&mut reconstructed)?;
+        write_property((&property.0, &property.1), &mut reconstructed)?;
         assert_eq!(original, &reconstructed[..]);
         Ok(())
     }
@@ -1827,10 +1822,10 @@ mod tests {
         let mut reader = Cursor::new(&original);
         let types = Types::new();
         let ctx = Context::new(&types);
-        let property = Property::read(&ctx, &mut reader)?.unwrap();
+        let property = read_property(&ctx, &mut reader)?.unwrap();
         println!("{property:#?}");
         let mut reconstructed: Vec<u8> = vec![];
-        property.write(&mut reconstructed)?;
+        write_property((&property.0, &property.1), &mut reconstructed)?;
         assert_eq!(original, &reconstructed[..]);
         Ok(())
     }
@@ -1851,10 +1846,10 @@ mod tests {
         let mut reader = Cursor::new(&original);
         let types = Types::new();
         let ctx = Context::new(&types);
-        let property = Property::read(&ctx, &mut reader)?.unwrap();
+        let property = read_property(&ctx, &mut reader)?.unwrap();
         println!("{property:#?}");
         let mut reconstructed: Vec<u8> = vec![];
-        property.write(&mut reconstructed)?;
+        write_property((&property.0, &property.1), &mut reconstructed)?;
         assert_eq!(original, &reconstructed[..]);
         Ok(())
     }
@@ -1896,10 +1891,10 @@ mod tests {
         let mut reader = Cursor::new(&original);
         let types = Types::new();
         let ctx = Context::new(&types);
-        let property = Property::read(&ctx, &mut reader)?.unwrap();
+        let property = read_property(&ctx, &mut reader)?.unwrap();
         println!("{property:#?}");
         let mut reconstructed: Vec<u8> = vec![];
-        property.write(&mut reconstructed)?;
+        write_property((&property.0, &property.1), &mut reconstructed)?;
         assert_eq!(original, &reconstructed[..]);
         Ok(())
     }
@@ -1931,10 +1926,10 @@ mod tests {
         let mut reader = Cursor::new(&original);
         let types = Types::new();
         let ctx = Context::new(&types);
-        let property = Property::read(&ctx, &mut reader)?.unwrap();
+        let property = read_property(&ctx, &mut reader)?.unwrap();
         println!("{property:#?}");
         let mut reconstructed: Vec<u8> = vec![];
-        property.write(&mut reconstructed)?;
+        write_property((&property.0, &property.1), &mut reconstructed)?;
         assert_eq!(original, &reconstructed[..]);
         Ok(())
     }
@@ -2079,10 +2074,10 @@ mod tests {
         let mut reader = Cursor::new(&original);
         let types = Types::new();
         let ctx = Context::new(&types);
-        let property = Property::read(&ctx, &mut reader)?.unwrap();
+        let property = read_property(&ctx, &mut reader)?.unwrap();
         println!("{property:#?}");
         let mut reconstructed: Vec<u8> = vec![];
-        property.write(&mut reconstructed)?;
+        write_property((&property.0, &property.1), &mut reconstructed)?;
         assert_eq!(original, &reconstructed[..]);
         Ok(())
     }

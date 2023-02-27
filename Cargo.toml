@@ -14,6 +14,7 @@ tempfile = "3.3.0"
 thiserror = "1.0.38"
 shell-words = "1.1.0"
 edit = "0.1.4"
+indexmap = { version = "1.9.2", features = ["serde"] }
 
 [dev-dependencies]
 pretty_assertions = "1.2.1"
