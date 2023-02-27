@@ -43,10 +43,14 @@ fn write_string<W: Write>(writer: &mut W, string: &str) -> TResult<()> {
     if string.is_empty() {
         writer.write_u32::<LE>(0)?;
     } else {
-        writer.write_u32::<LE>(string.as_bytes().len() as u32 + 1)?;
-        writer.write_all(string.as_bytes())?;
-        writer.write_u8(0)?;
+        write_string_always_trailing(writer, string)?;
     }
+    Ok(())
+}
+fn write_string_always_trailing<W: Write>(writer: &mut W, string: &str) -> TResult<()> {
+    writer.write_u32::<LE>(string.as_bytes().len() as u32 + 1)?;
+    writer.write_all(string.as_bytes())?;
+    writer.write_u8(0)?;
     Ok(())
 }
 
@@ -546,28 +550,77 @@ impl IntPoint {
     }
 }
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Text {
-    pub magic: u8,
-    pub value: String,
+pub enum Text {
+    StringTableEntry {
+        unknown: u32,
+        table: String,
+        entry: String,
+    },
+    CultureInvariant {
+        unknown: u64,
+        value: String,
+    },
+    Localized {
+        unknown: u32,
+        namespace: String,
+        key: String,
+        value: String,
+    },
 }
 impl<R: Read> Readable<R> for Text {
     fn read(reader: &mut R) -> TResult<Self> {
-        let magic = reader.read_u8()?;
-        match magic {
-            2 => {
-                reader.read_u64::<LE>()?;
+        match reader.read_u8()? {
+            0 => Ok(Self::StringTableEntry {
+                unknown: reader.read_u32::<LE>()?,
+                table: read_string(reader)?,
+                entry: read_string(reader)?,
+            }),
+            2 => Ok(Self::CultureInvariant {
+                unknown: reader.read_u64::<LE>()?,
+                value: read_string(reader)?,
+            }),
+            8 => Ok(Self::Localized {
+                unknown: reader.read_u32::<LE>()?,
+                namespace: read_string(reader)?,
+                key: read_string(reader)?,
+                value: read_string(reader)?,
+            }),
+            _ => Err(crate::error::Error::Other("unknown flag for Text")),
+        }
+    }
+}
+impl<W: Write> Writable<W> for Text {
+    fn write(&self, writer: &mut W) -> TResult<()> {
+        match self {
+            Self::StringTableEntry {
+                unknown,
+                table,
+                entry,
+            } => {
+                writer.write_u8(0)?;
+                writer.write_u32::<LE>(*unknown)?;
+                write_string_always_trailing(writer, table)?;
+                write_string_always_trailing(writer, entry)?;
             }
-            0 | 8 => {
-                reader.read_u64::<LE>()?;
-                reader.read_u8()?;
-                read_string(reader)?;
+            Self::CultureInvariant { unknown, value } => {
+                writer.write_u8(2)?;
+                writer.write_u64::<LE>(*unknown)?;
+                write_string_always_trailing(writer, value)?;
             }
-            _ => return Err(crate::error::Error::Other("unknown magic byte for Text")),
-        };
-        Ok(Self {
-            magic,
-            value: read_string(reader)?,
-        })
+            Self::Localized {
+                unknown,
+                namespace,
+                key,
+                value,
+            } => {
+                writer.write_u8(8)?;
+                writer.write_u32::<LE>(*unknown)?;
+                write_string_always_trailing(writer, namespace)?;
+                write_string_always_trailing(writer, key)?;
+                write_string_always_trailing(writer, value)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1300,10 +1353,13 @@ impl Property {
                 writer.write_all(&buf)?;
                 size
             }
-            Property::Text { id, /* value */ .. } => {
+            Property::Text { id, value } => {
                 write_optional_uuid(writer, *id)?;
-                todo!("TODO: write Property::Text");
-                //write_string(writer, value)?;
+                let mut buf = vec![];
+                value.write(&mut buf)?;
+                let size = buf.len();
+                writer.write_all(&buf)?;
+                size
             }
             Property::MulticastInlineDelegate { id, value } => {
                 write_optional_uuid(writer, *id)?;
