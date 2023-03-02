@@ -206,6 +206,7 @@ pub enum PropertyType {
     SoftObjectProperty,
     NameProperty,
     TextProperty,
+    MulticastDelegateProperty,
     MulticastInlineDelegateProperty,
     SetProperty,
     MapProperty,
@@ -227,6 +228,7 @@ impl PropertyType {
             PropertyType::SoftObjectProperty => "SoftObjectProperty",
             PropertyType::NameProperty => "NameProperty",
             PropertyType::TextProperty => "TextProperty",
+            PropertyType::MulticastDelegateProperty => "MulticastDelegateProperty",
             PropertyType::MulticastInlineDelegateProperty => "MulticastInlineDelegateProperty",
             PropertyType::SetProperty => "SetProperty",
             PropertyType::MapProperty => "MapProperty",
@@ -249,6 +251,7 @@ impl PropertyType {
             "SoftObjectProperty" => Ok(PropertyType::SoftObjectProperty),
             "NameProperty" => Ok(PropertyType::NameProperty),
             "TextProperty" => Ok(PropertyType::TextProperty),
+            "MulticastDelegateProperty" => Ok(PropertyType::MulticastDelegateProperty),
             "MulticastInlineDelegateProperty" => Ok(PropertyType::MulticastInlineDelegateProperty),
             "SetProperty" => Ok(PropertyType::SetProperty),
             "MapProperty" => Ok(PropertyType::MapProperty),
@@ -368,13 +371,13 @@ impl MapEntry {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct MulticastInlineDelegate(Vec<MulticastInlineDelegateEntry>);
-impl MulticastInlineDelegate {
+pub struct MulticastDelegate(Vec<MulticastDelegateEntry>);
+impl MulticastDelegate {
     fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self(read_array(
             reader.read_u32::<LE>()?,
             reader,
-            MulticastInlineDelegateEntry::read,
+            MulticastDelegateEntry::read,
         )?))
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
@@ -387,11 +390,30 @@ impl MulticastInlineDelegate {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct MulticastInlineDelegateEntry {
+pub struct MulticastInlineDelegate(Vec<MulticastDelegateEntry>);
+impl MulticastInlineDelegate {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+        Ok(Self(read_array(
+            reader.read_u32::<LE>()?,
+            reader,
+            MulticastDelegateEntry::read,
+        )?))
+    }
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
+        writer.write_u32::<LE>(self.0.len() as u32)?;
+        for entry in &self.0 {
+            entry.write(writer)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct MulticastDelegateEntry {
     pub path: String,
     pub name: String,
 }
-impl MulticastInlineDelegateEntry {
+impl MulticastDelegateEntry {
     fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             path: read_string(reader)?,
@@ -1051,6 +1073,11 @@ pub enum Property {
         id: Option<uuid::Uuid>,
         value: Text,
     },
+    MulticastDelegate {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<uuid::Uuid>,
+        value: MulticastDelegate,
+    },
     MulticastInlineDelegate {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
@@ -1099,6 +1126,7 @@ impl Property {
             Property::SoftObject { .. } => PropertyType::SoftObjectProperty,
             Property::Object { .. } => PropertyType::ObjectProperty,
             Property::Text { .. } => PropertyType::TextProperty,
+            Property::MulticastDelegate { .. } => PropertyType::MulticastDelegateProperty,
             Property::MulticastInlineDelegate { .. } => {
                 PropertyType::MulticastInlineDelegateProperty
             }
@@ -1174,6 +1202,10 @@ impl Property {
             PropertyType::TextProperty => Ok(Property::Text {
                 id: read_optional_uuid(reader)?,
                 value: Text::read(reader)?,
+            }),
+            PropertyType::MulticastDelegateProperty => Ok(Property::MulticastDelegate {
+                id: read_optional_uuid(reader)?,
+                value: MulticastDelegate::read(reader)?,
             }),
             PropertyType::MulticastInlineDelegateProperty => {
                 Ok(Property::MulticastInlineDelegate {
@@ -1354,6 +1386,14 @@ impl Property {
                 size
             }
             Property::Text { id, value } => {
+                write_optional_uuid(writer, *id)?;
+                let mut buf = vec![];
+                value.write(&mut buf)?;
+                let size = buf.len();
+                writer.write_all(&buf)?;
+                size
+            }
+            Property::MulticastDelegate { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 value.write(&mut buf)?;
