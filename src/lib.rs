@@ -191,151 +191,87 @@ impl<'t, 'n> Context<'t, 'n> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PropertyType {
-    IntProperty,
-    Int64Property,
-    UInt32Property,
-    FloatProperty,
-    BoolProperty,
-    ByteProperty,
-    EnumProperty,
-    ArrayProperty,
-    ObjectProperty,
-    StrProperty,
-    SoftObjectProperty,
-    NameProperty,
-    TextProperty,
-    MulticastDelegateProperty,
-    MulticastInlineDelegateProperty,
-    SetProperty,
-    MapProperty,
-    StructProperty,
-}
-impl PropertyType {
-    fn get_name(&self) -> &str {
-        match &self {
-            PropertyType::IntProperty => "IntProperty",
-            PropertyType::Int64Property => "Int64Property",
-            PropertyType::UInt32Property => "UInt32Property",
-            PropertyType::FloatProperty => "FloatProperty",
-            PropertyType::BoolProperty => "BoolProperty",
-            PropertyType::ByteProperty => "ByteProperty",
-            PropertyType::EnumProperty => "EnumProperty",
-            PropertyType::ArrayProperty => "ArrayProperty",
-            PropertyType::ObjectProperty => "ObjectProperty",
-            PropertyType::StrProperty => "StrProperty",
-            PropertyType::SoftObjectProperty => "SoftObjectProperty",
-            PropertyType::NameProperty => "NameProperty",
-            PropertyType::TextProperty => "TextProperty",
-            PropertyType::MulticastDelegateProperty => "MulticastDelegateProperty",
-            PropertyType::MulticastInlineDelegateProperty => "MulticastInlineDelegateProperty",
-            PropertyType::SetProperty => "SetProperty",
-            PropertyType::MapProperty => "MapProperty",
-            PropertyType::StructProperty => "StructProperty",
+// Dear Assembly
+//
+// Macros are a hellish demonic way to code. So I have made one for you.
+macro_rules! property_type {
+    ($($name:ident)+) => {
+        #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+        pub enum PropertyType {
+            $($name,)+
         }
-    }
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
-        let t = read_string(reader)?;
-        match t.as_str() {
-            "IntProperty" => Ok(PropertyType::IntProperty),
-            "Int64Property" => Ok(PropertyType::Int64Property),
-            "UInt32Property" => Ok(PropertyType::UInt32Property),
-            "FloatProperty" => Ok(PropertyType::FloatProperty),
-            "BoolProperty" => Ok(PropertyType::BoolProperty),
-            "ByteProperty" => Ok(PropertyType::ByteProperty),
-            "EnumProperty" => Ok(PropertyType::EnumProperty),
-            "ArrayProperty" => Ok(PropertyType::ArrayProperty),
-            "ObjectProperty" => Ok(PropertyType::ObjectProperty),
-            "StrProperty" => Ok(PropertyType::StrProperty),
-            "SoftObjectProperty" => Ok(PropertyType::SoftObjectProperty),
-            "NameProperty" => Ok(PropertyType::NameProperty),
-            "TextProperty" => Ok(PropertyType::TextProperty),
-            "MulticastDelegateProperty" => Ok(PropertyType::MulticastDelegateProperty),
-            "MulticastInlineDelegateProperty" => Ok(PropertyType::MulticastInlineDelegateProperty),
-            "SetProperty" => Ok(PropertyType::SetProperty),
-            "MapProperty" => Ok(PropertyType::MapProperty),
-            "StructProperty" => Ok(PropertyType::StructProperty),
-            _ => Err(crate::error::Error::UnknownPropertyType(format!("{t:?}"))),
+
+        impl PropertyType {
+            fn get_name(&self) -> &str {
+                match &self {
+                    $(PropertyType::$name => stringify!($name),)+
+                }
+            }
+            fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+                let t = read_string(reader)?;
+                match t.as_str() {
+                    $(stringify!($name) => Ok(PropertyType::$name),)+
+                    _ => Err(crate::error::Error::UnknownPropertyType(format!("{t:?}"))),
+                }
+            }
+            fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
+                write_string(writer, self.get_name())?;
+                Ok(())
+            }
         }
-    }
-    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        write_string(writer, self.get_name())?;
-        Ok(())
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StructType {
-    Guid,
-    DateTime,
-    Vector2D,
-    Vector,
-    Box,
-    IntPoint,
-    Quat,
-    Rotator,
-    LinearColor,
-    Struct(Option<String>),
-}
-impl From<&str> for StructType {
-    fn from(t: &str) -> Self {
-        match t {
-            "Guid" => StructType::Guid,
-            "DateTime" => StructType::DateTime,
-            "Vector2D" => StructType::Vector2D,
-            "Vector" => StructType::Vector,
-            "Box" => StructType::Box,
-            "IntPoint" => StructType::IntPoint,
-            "Quat" => StructType::Quat,
-            "Rotator" => StructType::Rotator,
-            "LinearColor" => StructType::LinearColor,
-            "Struct" => StructType::Struct(None),
-            _ => StructType::Struct(Some(t.to_owned())),
+property_type!{IntProperty Int64Property UInt32Property FloatProperty BoolProperty ByteProperty EnumProperty ArrayProperty ObjectProperty StrProperty SoftObjectProperty NameProperty TextProperty MulticastDelegateProperty MulticastInlineDelegateProperty SetProperty MapProperty StructProperty}
+
+// Dear Assembly
+//
+// Your code now has 1 macro. I will make you another macro. The next macro will be $100 per character. If you can not handle these prices please contact our legal department.
+macro_rules! struct_type {
+    ($($name:ident)+) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+        pub enum StructType {
+            $($name,)+
+            Struct(Option<String>),
+        }
+        impl From<&str> for StructType {
+            fn from(t: &str) -> Self {
+                match t {
+                    $(stringify!($name) => StructType::$name,)+
+                    "Struct" => StructType::Struct(None),
+                    _ => StructType::Struct(Some(t.to_owned())),
+                }
+            }
+        }
+        impl From<String> for StructType {
+            fn from(t: String) -> Self {
+                match t.as_str() {
+                    $(stringify!($name) => StructType::$name,)+
+                    "Struct" => StructType::Struct(None),
+                    _ => StructType::Struct(Some(t)),
+                }
+            }
+        }
+        impl StructType {
+            fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+                Ok(read_string(reader)?.into())
+            }
+            fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
+                write_string(
+                    writer,
+                    match &self {
+                        $(StructType::$name => stringify!($name),)+
+                        StructType::Struct(Some(t)) => t,
+                        _ => unreachable!(),
+                    },
+                )?;
+                Ok(())
+            }
         }
     }
 }
-impl From<String> for StructType {
-    fn from(t: String) -> Self {
-        match t.as_str() {
-            "Guid" => StructType::Guid,
-            "DateTime" => StructType::DateTime,
-            "Vector2D" => StructType::Vector2D,
-            "Vector" => StructType::Vector,
-            "Box" => StructType::Box,
-            "IntPoint" => StructType::IntPoint,
-            "Quat" => StructType::Quat,
-            "Rotator" => StructType::Rotator,
-            "LinearColor" => StructType::LinearColor,
-            "Struct" => StructType::Struct(None),
-            _ => StructType::Struct(Some(t)),
-        }
-    }
-}
-impl StructType {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
-        Ok(read_string(reader)?.into())
-    }
-    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        write_string(
-            writer,
-            match &self {
-                StructType::Guid => "Guid",
-                StructType::DateTime => "DateTime",
-                StructType::Vector2D => "Vector2D",
-                StructType::Vector => "Vector",
-                StructType::Box => "Box",
-                StructType::IntPoint => "IntPoint",
-                StructType::Quat => "Quat",
-                StructType::Rotator => "Rotator",
-                StructType::LinearColor => "LinearColor",
-                StructType::Struct(Some(t)) => t,
-                _ => unreachable!(),
-            },
-        )?;
-        Ok(())
-    }
-}
+
+struct_type!{Guid DateTime Vector2D Vector Box IntPoint Quat Rotator LinearColor}
 
 type DateTime = u64;
 type Int = i32;
