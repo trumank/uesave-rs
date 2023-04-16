@@ -1,11 +1,13 @@
 mod error;
 
+pub use error::Error;
+
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io::{Read, Write};
 
 use serde::{Deserialize, Serialize};
 
-type TResult<T> = Result<T, crate::error::Error>;
+type TResult<T> = Result<T, Error>;
 
 trait Readable<R> {
     fn read(reader: &mut R) -> TResult<Self>
@@ -256,7 +258,7 @@ impl PropertyType {
             "SetProperty" => Ok(PropertyType::SetProperty),
             "MapProperty" => Ok(PropertyType::MapProperty),
             "StructProperty" => Ok(PropertyType::StructProperty),
-            _ => Err(crate::error::Error::UnknownPropertyType(format!("{t:?}"))),
+            _ => Err(Error::UnknownPropertyType(format!("{t:?}"))),
         }
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
@@ -607,7 +609,7 @@ impl<R: Read> Readable<R> for Text {
                 key: read_string(reader)?,
                 value: read_string(reader)?,
             }),
-            _ => Err(crate::error::Error::Other("unknown flag for Text")),
+            _ => Err(Error::Other("unknown flag for Text")),
         }
     }
 }
@@ -843,7 +845,7 @@ impl ValueVec {
             PropertyType::ObjectProperty => {
                 ValueVec::Object(read_array(count, reader, read_string)?)
             }
-            _ => return Err(crate::error::Error::UnknownVecType(format!("{t:?}"))),
+            _ => return Err(Error::UnknownVecType(format!("{t:?}"))),
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
