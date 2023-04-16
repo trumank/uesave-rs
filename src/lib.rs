@@ -1,3 +1,32 @@
+/*!
+A library for reading and writing Unreal Engine save files (commonly referred to
+as GVAS).
+
+It has been tested on an extensive set of object structures and can fully read
+and write Deep Rock Galactic save files (and likely a lot more).
+
+There is a small binary utility to quickly convert saves to and from a plain
+text JSON format which can be used for manual save editing.
+
+# Example
+
+```
+use std::fs::File;
+
+use uesave::{Property, Save};
+
+let save = Save::read(&mut File::open("drg-save-test.sav")?)?;
+match save.root.properties["NumberOfGamesPlayed"] {
+    Property::Int { value, .. } => {
+        assert_eq!(2173, value);
+    }
+    _ => {}
+}
+# Ok::<(), uesave::Error>(())
+
+```
+*/
+
 mod error;
 
 pub use error::Error;
@@ -137,14 +166,17 @@ impl<W: Write> Writable<W> for uuid::Uuid {
     }
 }
 
+/// Used to disambiguate types within a [`Property::Set`] or [`Property::Map`] during parsing.
 #[derive(Debug, Default)]
 pub struct Types {
     types: std::collections::HashMap<String, StructType>,
 }
 impl Types {
+    /// Create an empty [`Types`] specification
     pub fn new() -> Self {
         Self::default()
     }
+    /// Add a new type at the given path
     pub fn add(&mut self, path: String, t: StructType) {
         // TODO: Handle escaping of '.' in property names
         // probably should store keys as Vec<String>
@@ -648,12 +680,13 @@ impl<W: Write> Writable<W> for Text {
     }
 }
 
+/// Just a plain byte, or an enum in which case the variant will be a String
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Byte {
     Byte(u8),
     Label(String),
 }
-
+/// Vectorized [`Byte`]
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ByteArray {
     Byte(Vec<u8>),
@@ -687,9 +720,11 @@ pub enum StructValue {
     Quat(Quat),
     LinearColor(LinearColor),
     Rotator(Rotator),
+    /// User defined struct which is simply a list of properties
     Struct(Properties),
 }
 
+/// Vectorized properties to avoid storing the variant with each value
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ValueVec {
     Int(Vec<Int>),
@@ -705,6 +740,7 @@ pub enum ValueVec {
     Box(Vec<Box>),
 }
 
+/// Encapsulates [`ValueVec`] with a special handling of structs. See also: [`ValueSet`]
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ValueArray {
     Base(ValueVec),
@@ -716,6 +752,7 @@ pub enum ValueArray {
         value: Vec<StructValue>,
     },
 }
+/// Encapsulates [`ValueVec`] with a special handling of structs. See also: [`ValueArray`]
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ValueSet {
     Base(ValueVec),
@@ -1009,7 +1046,7 @@ impl ValueSet {
     }
 }
 
-// Values with IDs present in the top level object and StructProperty
+/// Properties consist of an ID and a value and are present in [`Root`] and [`StructValue::Struct`]
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Property {
     Int {
@@ -1553,6 +1590,7 @@ impl<W: Write> Writable<W> for Header {
     }
 }
 
+/// Root struct inside a save file which holds both the Unreal Engine class name and list of properties
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Root {
     pub save_game_type: String,
@@ -1579,9 +1617,11 @@ pub struct Save {
     pub extra: Vec<u8>,
 }
 impl Save {
+    /// Reads save from the given reader
     pub fn read<R: Read>(reader: &mut R) -> TResult<Self> {
         Self::read_with_types(reader, &Types::new())
     }
+    /// Reads save from the given reader using the provided [`Types`]
     pub fn read_with_types<R: Read>(reader: &mut R, types: &Types) -> TResult<Self> {
         let context = Context::new(types);
 
