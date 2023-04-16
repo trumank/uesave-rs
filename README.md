@@ -28,3 +28,16 @@ Options:
 
 ```
 ![edit](https://user-images.githubusercontent.com/1144160/210157064-234da188-ad20-416f-9ea5-7d2956168a20.svg)
+
+## Alternative projects
+in no particular order:
+https://github.com/rob0rt/drg-save-parser
+https://github.com/ch1pset/UESaveTool
+https://github.com/13xforever/gvas-converter
+https://github.com/RagingLightning/gvas-converter
+https://github.com/SparkyTD/UnrealEngine.Gvas
+https://github.com/localcc/gvas
+https://github.com/oberien/gvas-rs
+https://github.com/scottanderson/railroad.studio
+https://github.com/CrystalFerrai/UeSaveGame
+https://github.com/agc93/unsave
