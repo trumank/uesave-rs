@@ -1,7 +1,7 @@
 # uesave
 
-[![docs.rs](https://img.shields.io/docsrs/uesave)](https://crates.io/crates/uesave)
-[![Crates.io](https://img.shields.io/crates/v/uesave)](https://docs.rs/uesave)
+[![docs.rs](https://img.shields.io/docsrs/uesave)](https://docs.rs/uesave)
+[![Crates.io](https://img.shields.io/crates/v/uesave)](https://crates.io/crates/uesave)
 
 A library for reading and writing Unreal Engine save files (commonly referred to
 as GVAS).
