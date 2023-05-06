@@ -310,6 +310,8 @@ pub enum StructType {
     Quat,
     Rotator,
     LinearColor,
+    Color,
+    SoftObjectPath,
     Struct(Option<String>),
 }
 impl From<&str> for StructType {
@@ -324,6 +326,8 @@ impl From<&str> for StructType {
             "Quat" => StructType::Quat,
             "Rotator" => StructType::Rotator,
             "LinearColor" => StructType::LinearColor,
+            "Color" => StructType::Color,
+            "SoftObjectPath" => StructType::SoftObjectPath,
             "Struct" => StructType::Struct(None),
             _ => StructType::Struct(Some(t.to_owned())),
         }
@@ -341,6 +345,8 @@ impl From<String> for StructType {
             "Quat" => StructType::Quat,
             "Rotator" => StructType::Rotator,
             "LinearColor" => StructType::LinearColor,
+            "Color" => StructType::Color,
+            "SoftObjectPath" => StructType::SoftObjectPath,
             "Struct" => StructType::Struct(None),
             _ => StructType::Struct(Some(t)),
         }
@@ -363,6 +369,8 @@ impl StructType {
                 StructType::Quat => "Quat",
                 StructType::Rotator => "Rotator",
                 StructType::LinearColor => "LinearColor",
+                StructType::Color => "Color",
+                StructType::SoftObjectPath => "SoftObjectPath",
                 StructType::Struct(Some(t)) => t,
                 _ => unreachable!(),
             },
@@ -527,6 +535,30 @@ impl Rotator {
         writer.write_f32::<LE>(self.x)?;
         writer.write_f32::<LE>(self.y)?;
         writer.write_f32::<LE>(self.z)?;
+        Ok(())
+    }
+}
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+impl Color {
+    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+        Ok(Self {
+            r: reader.read_u8()?,
+            g: reader.read_u8()?,
+            b: reader.read_u8()?,
+            a: reader.read_u8()?,
+        })
+    }
+    fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
+        writer.write_u8(self.r)?;
+        writer.write_u8(self.g)?;
+        writer.write_u8(self.b)?;
+        writer.write_u8(self.a)?;
         Ok(())
     }
 }
@@ -705,6 +737,7 @@ pub enum PropertyValue {
     Name(String),
     Str(String),
     SoftObject(String, String),
+    SoftObjectPath(String, String),
     Object(String),
     Struct(StructValue),
 }
@@ -718,8 +751,10 @@ pub enum StructValue {
     Box(Box),
     IntPoint(IntPoint),
     Quat(Quat),
-    LinearColor(LinearColor),
     Rotator(Rotator),
+    LinearColor(LinearColor),
+    Color(Color),
+    SoftObjectPath(String, String),
     /// User defined struct which is simply a list of properties
     Struct(Properties),
 }
@@ -799,6 +834,10 @@ impl PropertyValue {
                 write_string(writer, a)?;
                 write_string(writer, b)?;
             }
+            PropertyValue::SoftObjectPath(a, b) => {
+                write_string(writer, a)?;
+                write_string(writer, b)?;
+            }
             PropertyValue::Object(v) => write_string(writer, v)?,
             PropertyValue::Byte(v) => match v {
                 Byte::Byte(b) => writer.write_u8(*b)?,
@@ -820,8 +859,12 @@ impl StructValue {
             StructType::Box => StructValue::Box(Box::read(reader)?),
             StructType::IntPoint => StructValue::IntPoint(IntPoint::read(reader)?),
             StructType::Quat => StructValue::Quat(Quat::read(reader)?),
-            StructType::LinearColor => StructValue::LinearColor(LinearColor::read(reader)?),
             StructType::Rotator => StructValue::Rotator(Rotator::read(reader)?),
+            StructType::LinearColor => StructValue::LinearColor(LinearColor::read(reader)?),
+            StructType::Color => StructValue::Color(Color::read(reader)?),
+            StructType::SoftObjectPath => {
+                StructValue::SoftObjectPath(read_string(reader)?, read_string(reader)?)
+            }
             StructType::Struct(_) => {
                 StructValue::Struct(read_properties_until_none(context, reader)?)
             }
@@ -836,8 +879,13 @@ impl StructValue {
             StructValue::Box(v) => v.write(writer)?,
             StructValue::IntPoint(v) => v.write(writer)?,
             StructValue::Quat(v) => v.write(writer)?,
-            StructValue::LinearColor(v) => v.write(writer)?,
             StructValue::Rotator(v) => v.write(writer)?,
+            StructValue::LinearColor(v) => v.write(writer)?,
+            StructValue::Color(v) => v.write(writer)?,
+            StructValue::SoftObjectPath(a, b) => {
+                write_string(writer, a)?;
+                write_string(writer, b)?;
+            }
             StructValue::Struct(v) => write_properties_none_terminated(writer, v)?,
         }
         Ok(())
