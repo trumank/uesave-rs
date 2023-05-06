@@ -13,3 +13,10 @@ pub enum Error {
     #[error("{0}")]
     Other(&'static str),
 }
+
+#[derive(thiserror::Error, Debug)]
+#[error("at offset {offset}: {error}")]
+pub struct ParseError {
+    pub offset: usize,
+    pub error: Error,
+}

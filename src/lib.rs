@@ -22,7 +22,7 @@ match save.root.properties["NumberOfGamesPlayed"] {
     }
     _ => {}
 }
-# Ok::<(), uesave::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 
 ```
 */
@@ -32,7 +32,8 @@ mod error;
 pub use error::Error;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
-use std::io::{Read, Write};
+use error::ParseError;
+use std::io::{Read, Seek, Write};
 
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +48,37 @@ trait Writable<W> {
     fn write(&self, writer: &mut W) -> TResult<()>;
 }
 
-fn read_optional_uuid<R: Read>(reader: &mut R) -> TResult<Option<uuid::Uuid>> {
+struct SeekReader<R: Read> {
+    reader: R,
+    read_bytes: usize,
+}
+
+impl<R: Read> SeekReader<R> {
+    fn new(reader: R) -> Self {
+        Self {
+            reader,
+            read_bytes: 0,
+        }
+    }
+}
+impl<R: Read> Seek for SeekReader<R> {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        match pos {
+            std::io::SeekFrom::Current(0) => Ok(self.read_bytes as u64),
+            _ => unimplemented!(),
+        }
+    }
+}
+impl<R: Read> Read for SeekReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.reader.read(buf).map(|s| {
+            self.read_bytes += s;
+            s
+        })
+    }
+}
+
+fn read_optional_uuid<R: Read + Seek>(reader: &mut R) -> TResult<Option<uuid::Uuid>> {
     Ok(if reader.read_u8()? > 0 {
         Some(uuid::Uuid::read(reader)?)
     } else {
@@ -64,7 +95,7 @@ fn write_optional_uuid<W: Write>(writer: &mut W, id: Option<uuid::Uuid>) -> TRes
     Ok(())
 }
 
-fn read_string<R: Read>(reader: &mut R) -> TResult<String> {
+fn read_string<R: Read + Seek>(reader: &mut R) -> TResult<String> {
     let len = reader.read_i32::<LE>()?;
     if len < 0 {
         let chars = read_array((-len) as u32, reader, |r| Ok(r.read_u16::<LE>()?))?;
@@ -103,7 +134,10 @@ fn write_string_always_trailing<W: Write>(writer: &mut W, string: &str) -> TResu
 
 type Properties = indexmap::IndexMap<String, Property>;
 
-fn read_properties_until_none<R: Read>(context: &Context, reader: &mut R) -> TResult<Properties> {
+fn read_properties_until_none<R: Read + Seek>(
+    context: &Context,
+    reader: &mut R,
+) -> TResult<Properties> {
     let mut properties = Properties::new();
     while let Some((name, prop)) = read_property(context, reader)? {
         properties.insert(name, prop);
@@ -121,7 +155,7 @@ fn write_properties_none_terminated<W: Write>(
     Ok(())
 }
 
-fn read_property<R: Read>(
+fn read_property<R: Read + Seek>(
     context: &Context,
     reader: &mut R,
 ) -> TResult<Option<(String, Property)>> {
@@ -148,7 +182,7 @@ fn write_property<W: Write>(prop: (&String, &Property), writer: &mut W) -> TResu
     Ok(())
 }
 
-fn read_array<T, F, R: Read>(length: u32, reader: &mut R, f: F) -> TResult<Vec<T>>
+fn read_array<T, F, R: Read + Seek>(length: u32, reader: &mut R, f: F) -> TResult<Vec<T>>
 where
     F: Fn(&mut R) -> TResult<T>,
 {
@@ -156,7 +190,7 @@ where
 }
 
 #[rustfmt::skip]
-impl<R: Read> Readable<R> for uuid::Uuid {
+impl<R: Read + Seek> Readable<R> for uuid::Uuid {
     fn read(reader: &mut R) -> TResult<uuid::Uuid> {
         let mut b = [0; 16];
         reader.read_exact(&mut b)?;
@@ -285,7 +319,7 @@ impl PropertyType {
             PropertyType::StructProperty => "StructProperty",
         }
     }
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         let t = read_string(reader)?;
         match t.as_str() {
             "IntProperty" => Ok(PropertyType::IntProperty),
@@ -369,7 +403,7 @@ impl From<String> for StructType {
     }
 }
 impl StructType {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         Ok(read_string(reader)?.into())
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
@@ -409,7 +443,7 @@ pub struct MapEntry {
     pub value: PropertyValue,
 }
 impl MapEntry {
-    fn read<R: Read>(
+    fn read<R: Read + Seek>(
         context: &Context,
         key_type: &PropertyType,
         key_struct_type: Option<&StructType>,
@@ -431,7 +465,7 @@ impl MapEntry {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct MulticastDelegate(Vec<MulticastDelegateEntry>);
 impl MulticastDelegate {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         Ok(Self(read_array(
             reader.read_u32::<LE>()?,
             reader,
@@ -450,7 +484,7 @@ impl MulticastDelegate {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct MulticastInlineDelegate(Vec<MulticastDelegateEntry>);
 impl MulticastInlineDelegate {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         Ok(Self(read_array(
             reader.read_u32::<LE>()?,
             reader,
@@ -472,7 +506,7 @@ pub struct MulticastDelegateEntry {
     pub name: String,
 }
 impl MulticastDelegateEntry {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             path: read_string(reader)?,
             name: read_string(reader)?,
@@ -493,7 +527,7 @@ pub struct LinearColor {
     pub a: f32,
 }
 impl LinearColor {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             r: reader.read_f32::<LE>()?,
             g: reader.read_f32::<LE>()?,
@@ -517,7 +551,7 @@ pub struct Quat {
     pub w: f32,
 }
 impl Quat {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             x: reader.read_f32::<LE>()?,
             y: reader.read_f32::<LE>()?,
@@ -540,7 +574,7 @@ pub struct Rotator {
     pub z: f32,
 }
 impl Rotator {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             x: reader.read_f32::<LE>()?,
             y: reader.read_f32::<LE>()?,
@@ -585,7 +619,7 @@ pub struct Vector {
     pub z: f32,
 }
 impl Vector {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             x: reader.read_f32::<LE>()?,
             y: reader.read_f32::<LE>()?,
@@ -605,7 +639,7 @@ pub struct Vector2D {
     pub y: f32,
 }
 impl Vector2D {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             x: reader.read_f32::<LE>()?,
             y: reader.read_f32::<LE>()?,
@@ -623,7 +657,7 @@ pub struct Box {
     pub b: Vector,
 }
 impl Box {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         let a = Vector::read(reader)?;
         let b = Vector::read(reader)?;
         reader.read_u8()?;
@@ -641,7 +675,7 @@ pub struct IntPoint {
     pub y: i32,
 }
 impl IntPoint {
-    fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut R) -> TResult<Self> {
         Ok(Self {
             x: reader.read_i32::<LE>()?,
             y: reader.read_i32::<LE>()?,
@@ -672,7 +706,7 @@ pub enum Text {
         value: String,
     },
 }
-impl<R: Read> Readable<R> for Text {
+impl<R: Read + Seek> Readable<R> for Text {
     fn read(reader: &mut R) -> TResult<Self> {
         match reader.read_u8()? {
             0 => Ok({
@@ -782,9 +816,9 @@ pub enum StructValue {
     Box(Box),
     IntPoint(IntPoint),
     Quat(Quat),
-    Rotator(Rotator),
     LinearColor(LinearColor),
     Color(Color),
+    Rotator(Rotator),
     SoftObjectPath(String, String),
     /// User defined struct which is simply a list of properties
     Struct(Properties),
@@ -827,7 +861,7 @@ pub enum ValueSet {
 }
 
 impl PropertyValue {
-    fn read<R: Read>(
+    fn read<R: Read + Seek>(
         context: &Context,
         t: &PropertyType,
         st: Option<&StructType>,
@@ -882,7 +916,11 @@ impl PropertyValue {
     }
 }
 impl StructValue {
-    fn read<R: Read>(context: &Context, t: &StructType, reader: &mut R) -> TResult<StructValue> {
+    fn read<R: Read + Seek>(
+        context: &Context,
+        t: &StructType,
+        reader: &mut R,
+    ) -> TResult<StructValue> {
         Ok(match t {
             StructType::Guid => StructValue::Guid(uuid::Uuid::read(reader)?),
             StructType::DateTime => StructValue::DateTime(reader.read_u64::<LE>()?),
@@ -891,9 +929,9 @@ impl StructValue {
             StructType::Box => StructValue::Box(Box::read(reader)?),
             StructType::IntPoint => StructValue::IntPoint(IntPoint::read(reader)?),
             StructType::Quat => StructValue::Quat(Quat::read(reader)?),
-            StructType::Rotator => StructValue::Rotator(Rotator::read(reader)?),
             StructType::LinearColor => StructValue::LinearColor(LinearColor::read(reader)?),
             StructType::Color => StructValue::Color(Color::read(reader)?),
+            StructType::Rotator => StructValue::Rotator(Rotator::read(reader)?),
             StructType::SoftObjectPath => {
                 StructValue::SoftObjectPath(read_string(reader)?, read_string(reader)?)
             }
@@ -911,9 +949,9 @@ impl StructValue {
             StructValue::Box(v) => v.write(writer)?,
             StructValue::IntPoint(v) => v.write(writer)?,
             StructValue::Quat(v) => v.write(writer)?,
-            StructValue::Rotator(v) => v.write(writer)?,
             StructValue::LinearColor(v) => v.write(writer)?,
             StructValue::Color(v) => v.write(writer)?,
+            StructValue::Rotator(v) => v.write(writer)?,
             StructValue::SoftObjectPath(a, b) => {
                 write_string(writer, a)?;
                 write_string(writer, b)?;
@@ -924,7 +962,12 @@ impl StructValue {
     }
 }
 impl ValueVec {
-    fn read<R: Read>(t: &PropertyType, size: u64, count: u32, reader: &mut R) -> TResult<ValueVec> {
+    fn read<R: Read + Seek>(
+        t: &PropertyType,
+        size: u64,
+        count: u32,
+        reader: &mut R,
+    ) -> TResult<ValueVec> {
         Ok(match t {
             PropertyType::IntProperty => {
                 ValueVec::Int(read_array(count, reader, |r| Ok(r.read_i32::<LE>()?))?)
@@ -1044,7 +1087,7 @@ impl ValueVec {
     }
 }
 impl ValueArray {
-    fn read<R: Read>(
+    fn read<R: Read + Seek>(
         context: &Context,
         t: &PropertyType,
         size: u64,
@@ -1104,7 +1147,7 @@ impl ValueArray {
     }
 }
 impl ValueSet {
-    fn read<R: Read>(
+    fn read<R: Read + Seek>(
         context: &Context,
         t: &PropertyType,
         st: Option<&StructType>,
@@ -1264,7 +1307,7 @@ impl Property {
             Property::Array { .. } => PropertyType::ArrayProperty,
         }
     }
-    fn read<R: Read>(
+    fn read<R: Read + Seek>(
         context: &Context,
         t: PropertyType,
         size: u64,
@@ -1607,7 +1650,7 @@ pub struct CustomFormatData {
     pub id: uuid::Uuid,
     pub value: i32,
 }
-impl<R: Read> Readable<R> for CustomFormatData {
+impl<R: Read + Seek> Readable<R> for CustomFormatData {
     fn read(reader: &mut R) -> TResult<Self> {
         Ok(CustomFormatData {
             id: uuid::Uuid::read(reader)?,
@@ -1636,7 +1679,7 @@ pub struct Header {
     pub custom_format_version: u32,
     pub custom_format: Vec<CustomFormatData>,
 }
-impl<R: Read> Readable<R> for Header {
+impl<R: Read + Seek> Readable<R> for Header {
     fn read(reader: &mut R) -> TResult<Self> {
         let magic = reader.read_u32::<LE>()?;
         if magic != u32::from_le_bytes(*b"GVAS") {
@@ -1686,7 +1729,7 @@ pub struct Root {
     pub properties: Properties,
 }
 impl Root {
-    fn read<R: Read>(context: &Context, reader: &mut R) -> TResult<Self> {
+    fn read<R: Read + Seek>(context: &Context, reader: &mut R) -> TResult<Self> {
         Ok(Self {
             save_game_type: read_string(reader)?,
             properties: read_properties_until_none(context, reader)?,
@@ -1707,27 +1750,34 @@ pub struct Save {
 }
 impl Save {
     /// Reads save from the given reader
-    pub fn read<R: Read>(reader: &mut R) -> TResult<Self> {
+    pub fn read<R: Read>(reader: &mut R) -> Result<Self, ParseError> {
         Self::read_with_types(reader, &Types::new())
     }
     /// Reads save from the given reader using the provided [`Types`]
-    pub fn read_with_types<R: Read>(reader: &mut R, types: &Types) -> TResult<Self> {
+    pub fn read_with_types<R: Read>(reader: &mut R, types: &Types) -> Result<Self, ParseError> {
         let context = Context::new(types);
+        let mut reader = SeekReader::new(reader);
 
-        Ok(Self {
-            header: Header::read(reader)?,
-            root: Root::read(&context, reader)?,
-            extra: {
-                let mut buf = vec![];
-                reader.read_to_end(&mut buf)?;
-                if buf != [0; 4] {
-                    eprintln!(
-                        "{} extra bytes. Save may not have been parsed completely.",
-                        buf.len()
-                    );
-                }
-                buf
-            },
+        let res = (|| {
+            Ok(Self {
+                header: Header::read(&mut reader)?,
+                root: Root::read(&context, &mut reader)?,
+                extra: {
+                    let mut buf = vec![];
+                    reader.read_to_end(&mut buf)?;
+                    if buf != [0; 4] {
+                        eprintln!(
+                            "{} extra bytes. Save may not have been parsed completely.",
+                            buf.len()
+                        );
+                    }
+                    buf
+                },
+            })
+        })();
+        res.map_err(|e| error::ParseError {
+            offset: reader.stream_position().unwrap() as usize, // our own implemenation which cannot fail
+            error: e,
         })
     }
     pub fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
@@ -1862,7 +1912,7 @@ mod tests {
     #[test]
     fn test_rw_save1() -> TResult<()> {
         let mut reader = Cursor::new(&SAVE);
-        let obj = Save::read(&mut reader)?;
+        let obj = Save::read(&mut reader).unwrap();
         let mut reconstructed: Vec<u8> = vec![];
         obj.write(&mut reconstructed)?;
         assert_eq!(SAVE, reconstructed);
