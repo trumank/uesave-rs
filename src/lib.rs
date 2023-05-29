@@ -65,10 +65,17 @@ fn write_optional_uuid<W: Write>(writer: &mut W, id: Option<uuid::Uuid>) -> TRes
 }
 
 fn read_string<R: Read>(reader: &mut R) -> TResult<String> {
-    let mut chars = vec![0; reader.read_u32::<LE>()? as usize];
-    reader.read_exact(&mut chars)?;
-    let length = chars.iter().position(|&c| c == 0).unwrap_or(chars.len());
-    Ok(String::from_utf8_lossy(&chars[..length]).into_owned())
+    let len = reader.read_i32::<LE>()?;
+    if len < 0 {
+        let chars = read_array((-len) as u32, reader, |r| Ok(r.read_u16::<LE>()?))?;
+        let length = chars.iter().position(|&c| c == 0).unwrap_or(chars.len());
+        Ok(String::from_utf16(&chars[..length]).unwrap())
+    } else {
+        let mut chars = vec![0; len as usize];
+        reader.read_exact(&mut chars)?;
+        let length = chars.iter().position(|&c| c == 0).unwrap_or(chars.len());
+        Ok(String::from_utf8_lossy(&chars[..length]).into_owned())
+    }
 }
 fn write_string<W: Write>(writer: &mut W, string: &str) -> TResult<()> {
     if string.is_empty() {
@@ -79,9 +86,18 @@ fn write_string<W: Write>(writer: &mut W, string: &str) -> TResult<()> {
     Ok(())
 }
 fn write_string_always_trailing<W: Write>(writer: &mut W, string: &str) -> TResult<()> {
-    writer.write_u32::<LE>(string.as_bytes().len() as u32 + 1)?;
-    writer.write_all(string.as_bytes())?;
-    writer.write_u8(0)?;
+    if string.is_empty() || string.is_ascii() {
+        writer.write_u32::<LE>(string.as_bytes().len() as u32 + 1)?;
+        writer.write_all(string.as_bytes())?;
+        writer.write_u8(0)?;
+    } else {
+        let chars: Vec<u16> = string.encode_utf16().collect();
+        writer.write_i32::<LE>(-(chars.len() as i32 + 1))?;
+        for c in chars {
+            writer.write_u16::<LE>(c)?;
+        }
+        writer.write_u16::<LE>(0)?;
+    }
     Ok(())
 }
 
@@ -642,7 +658,8 @@ pub enum Text {
     StringTableEntry {
         unknown: u32,
         table: String,
-        entry: String,
+        entry: Option<String>,
+        another: Option<String>,
     },
     CultureInvariant {
         unknown: u64,
@@ -658,10 +675,18 @@ pub enum Text {
 impl<R: Read> Readable<R> for Text {
     fn read(reader: &mut R) -> TResult<Self> {
         match reader.read_u8()? {
-            0 => Ok(Self::StringTableEntry {
-                unknown: reader.read_u32::<LE>()?,
-                table: read_string(reader)?,
-                entry: read_string(reader)?,
+            0 => Ok({
+                // TODO I really really have no idea what I'm doing an should take some time to
+                // actually read the source
+                let unknown = reader.read_u32::<LE>()?;
+                let flag = (unknown >> 24) == 0;
+
+                Self::StringTableEntry {
+                    unknown,
+                    table: read_string(reader)?,
+                    entry: flag.then(|| read_string(reader)).transpose()?,
+                    another: flag.then(|| read_string(reader)).transpose()?,
+                }
             }),
             2 => Ok(Self::CultureInvariant {
                 unknown: reader.read_u64::<LE>()?,
@@ -684,16 +709,22 @@ impl<W: Write> Writable<W> for Text {
                 unknown,
                 table,
                 entry,
+                another,
             } => {
                 writer.write_u8(0)?;
                 writer.write_u32::<LE>(*unknown)?;
-                write_string_always_trailing(writer, table)?;
-                write_string_always_trailing(writer, entry)?;
+                write_string(writer, table)?;
+                if let Some(s) = entry {
+                    write_string_always_trailing(writer, s)?
+                };
+                if let Some(s) = another {
+                    write_string_always_trailing(writer, s)?
+                };
             }
             Self::CultureInvariant { unknown, value } => {
                 writer.write_u8(2)?;
                 writer.write_u64::<LE>(*unknown)?;
-                write_string_always_trailing(writer, value)?;
+                write_string(writer, value)?;
             }
             Self::Localized {
                 unknown,
@@ -703,7 +734,7 @@ impl<W: Write> Writable<W> for Text {
             } => {
                 writer.write_u8(8)?;
                 writer.write_u32::<LE>(*unknown)?;
-                write_string_always_trailing(writer, namespace)?;
+                write_string(writer, namespace)?;
                 write_string_always_trailing(writer, key)?;
                 write_string_always_trailing(writer, value)?;
             }
