@@ -766,6 +766,7 @@ pub enum ValueVec {
     Int64(Vec<Int64>),
     UInt32(Vec<UInt32>),
     Float(Vec<Float>),
+    Bool(Vec<bool>),
     Byte(ByteArray),
     Enum(Vec<Enum>),
     Str(Vec<String>),
@@ -906,6 +907,9 @@ impl ValueVec {
             PropertyType::FloatProperty => {
                 ValueVec::Float(read_array(count, reader, |r| Ok(r.read_f32::<LE>()?))?)
             }
+            PropertyType::BoolProperty => {
+                ValueVec::Bool(read_array(count, reader, |r| Ok(r.read_u8()? > 0))?)
+            }
             PropertyType::ByteProperty => {
                 if size == count.into() {
                     ValueVec::Byte(ByteArray::Byte(read_array(count, reader, |r| {
@@ -957,6 +961,12 @@ impl ValueVec {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
                     writer.write_f32::<LE>(*i)?;
+                }
+            }
+            ValueVec::Bool(v) => {
+                writer.write_u32::<LE>(v.len() as u32)?;
+                for b in v {
+                    writer.write_u8(*b as u8)?;
                 }
             }
             ValueVec::Byte(v) => match v {
