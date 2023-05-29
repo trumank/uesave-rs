@@ -263,10 +263,11 @@ impl<'t, 'n> Context<'t, 'n> {
     fn get_type(&self) -> Option<&StructType> {
         self.types.types.get(&self.path())
     }
-    fn get_type_or<'a>(&'a self, t: &'a StructType) -> &'a StructType {
+    fn get_type_or<'a>(&'a self, offset: u64, t: &'a StructType) -> &'a StructType {
         self.get_type().unwrap_or_else(|| {
             eprintln!(
-                "StructType for \"{}\" unspecified, assuming {:?}",
+                "offset {}: StructType for \"{}\" unspecified, assuming {:?}",
+                offset,
                 self.path(),
                 t
             );
@@ -1389,7 +1390,9 @@ impl Property {
                 let id = read_optional_uuid(reader)?;
                 reader.read_u32::<LE>()?;
                 let struct_type = match set_type {
-                    PropertyType::StructProperty => Some(context.get_type_or(&StructType::Guid)),
+                    PropertyType::StructProperty => {
+                        Some(context.get_type_or(reader.stream_position()?, &StructType::Guid))
+                    }
                     _ => None,
                 };
                 let value = ValueSet::read(context, &set_type, struct_type, size - 8, reader)?;
@@ -1414,15 +1417,18 @@ impl Property {
                     StructType::Guid
                 };
                 let key_struct_type = match key_type {
-                    PropertyType::StructProperty => Some(key_path.get_type_or(&StructType::Guid)),
+                    PropertyType::StructProperty => {
+                        Some(key_path.get_type_or(reader.stream_position()?, &StructType::Guid))
+                    }
                     _ => None,
                 };
 
                 let value_path = context.push("Value");
                 let value_struct_type = match value_type {
-                    PropertyType::StructProperty => {
-                        Some(value_path.get_type_or(&StructType::Struct(None)))
-                    }
+                    PropertyType::StructProperty => Some(
+                        value_path
+                            .get_type_or(reader.stream_position()?, &StructType::Struct(None)),
+                    ),
                     _ => None,
                 };
 
@@ -1758,7 +1764,7 @@ impl Save {
         let context = Context::new(types);
         let mut reader = SeekReader::new(reader);
 
-        let res = (|| {
+        (|| {
             Ok(Self {
                 header: Header::read(&mut reader)?,
                 root: Root::read(&context, &mut reader)?,
@@ -1774,8 +1780,8 @@ impl Save {
                     buf
                 },
             })
-        })();
-        res.map_err(|e| error::ParseError {
+        })()
+        .map_err(|e| error::ParseError {
             offset: reader.stream_position().unwrap() as usize, // our own implemenation which cannot fail
             error: e,
         })
