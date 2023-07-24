@@ -282,6 +282,7 @@ pub enum PropertyType {
     Int64Property,
     UInt32Property,
     FloatProperty,
+    DoubleProperty,
     BoolProperty,
     ByteProperty,
     EnumProperty,
@@ -304,6 +305,7 @@ impl PropertyType {
             PropertyType::Int64Property => "Int64Property",
             PropertyType::UInt32Property => "UInt32Property",
             PropertyType::FloatProperty => "FloatProperty",
+            PropertyType::DoubleProperty => "DoubleProperty",
             PropertyType::BoolProperty => "BoolProperty",
             PropertyType::ByteProperty => "ByteProperty",
             PropertyType::EnumProperty => "EnumProperty",
@@ -327,6 +329,7 @@ impl PropertyType {
             "Int64Property" => Ok(PropertyType::Int64Property),
             "UInt32Property" => Ok(PropertyType::UInt32Property),
             "FloatProperty" => Ok(PropertyType::FloatProperty),
+            "DoubleProperty" => Ok(PropertyType::DoubleProperty),
             "BoolProperty" => Ok(PropertyType::BoolProperty),
             "ByteProperty" => Ok(PropertyType::ByteProperty),
             "EnumProperty" => Ok(PropertyType::EnumProperty),
@@ -435,6 +438,7 @@ type Int = i32;
 type Int64 = i64;
 type UInt32 = u32;
 type Float = f32;
+type Double = f64;
 type Bool = bool;
 type Enum = String;
 
@@ -797,6 +801,7 @@ pub enum PropertyValue {
     Int64(Int64),
     UInt32(UInt32),
     Float(Float),
+    Double(Double),
     Bool(Bool),
     Byte(Byte),
     Enum(Enum),
@@ -832,6 +837,7 @@ pub enum ValueVec {
     Int64(Vec<Int64>),
     UInt32(Vec<UInt32>),
     Float(Vec<Float>),
+    Double(Vec<Double>),
     Bool(Vec<bool>),
     Byte(ByteArray),
     Enum(Vec<Enum>),
@@ -873,6 +879,7 @@ impl PropertyValue {
             PropertyType::Int64Property => PropertyValue::Int64(reader.read_i64::<LE>()?),
             PropertyType::UInt32Property => PropertyValue::UInt32(reader.read_u32::<LE>()?),
             PropertyType::FloatProperty => PropertyValue::Float(reader.read_f32::<LE>()?),
+            PropertyType::DoubleProperty => PropertyValue::Double(reader.read_f64::<LE>()?),
             PropertyType::BoolProperty => PropertyValue::Bool(reader.read_u8()? > 0),
             PropertyType::NameProperty => PropertyValue::Name(read_string(reader)?),
             PropertyType::StrProperty => PropertyValue::Str(read_string(reader)?),
@@ -894,6 +901,7 @@ impl PropertyValue {
             PropertyValue::Int64(v) => writer.write_i64::<LE>(*v)?,
             PropertyValue::UInt32(v) => writer.write_u32::<LE>(*v)?,
             PropertyValue::Float(v) => writer.write_f32::<LE>(*v)?,
+            PropertyValue::Double(v) => writer.write_f64::<LE>(*v)?,
             PropertyValue::Bool(v) => writer.write_u8(u8::from(*v))?,
             PropertyValue::Name(v) => write_string(writer, v)?,
             PropertyValue::Str(v) => write_string(writer, v)?,
@@ -982,6 +990,9 @@ impl ValueVec {
             PropertyType::FloatProperty => {
                 ValueVec::Float(read_array(count, reader, |r| Ok(r.read_f32::<LE>()?))?)
             }
+            PropertyType::DoubleProperty => {
+                ValueVec::Double(read_array(count, reader, |r| Ok(r.read_f64::<LE>()?))?)
+            }
             PropertyType::BoolProperty => {
                 ValueVec::Bool(read_array(count, reader, |r| Ok(r.read_u8()? > 0))?)
             }
@@ -1036,6 +1047,12 @@ impl ValueVec {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
                     writer.write_f32::<LE>(*i)?;
+                }
+            }
+            ValueVec::Double(v) => {
+                writer.write_u32::<LE>(v.len() as u32)?;
+                for i in v {
+                    writer.write_f64::<LE>(*i)?;
                 }
             }
             ValueVec::Bool(v) => {
@@ -1202,6 +1219,11 @@ pub enum Property {
         id: Option<uuid::Uuid>,
         value: Float,
     },
+    Double {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<uuid::Uuid>,
+        value: Double,
+    },
     Bool {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
@@ -1290,6 +1312,7 @@ impl Property {
             Property::Int64 { .. } => PropertyType::Int64Property,
             Property::UInt32 { .. } => PropertyType::UInt32Property,
             Property::Float { .. } => PropertyType::FloatProperty,
+            Property::Double { .. } => PropertyType::DoubleProperty,
             Property::Bool { .. } => PropertyType::BoolProperty,
             Property::Byte { .. } => PropertyType::ByteProperty,
             Property::Enum { .. } => PropertyType::EnumProperty,
@@ -1330,6 +1353,10 @@ impl Property {
             PropertyType::FloatProperty => Ok(Property::Float {
                 id: read_optional_uuid(reader)?,
                 value: reader.read_f32::<LE>()?,
+            }),
+            PropertyType::DoubleProperty => Ok(Property::Double {
+                id: read_optional_uuid(reader)?,
+                value: reader.read_f64::<LE>()?,
             }),
             PropertyType::BoolProperty => Ok(Property::Bool {
                 value: reader.read_u8()? > 0,
@@ -1495,6 +1522,11 @@ impl Property {
                 write_optional_uuid(writer, *id)?;
                 writer.write_f32::<LE>(*value)?;
                 4
+            }
+            Property::Double { id, value } => {
+                write_optional_uuid(writer, *id)?;
+                writer.write_f64::<LE>(*value)?;
+                8
             }
             Property::Bool { id, value } => {
                 writer.write_u8(u8::from(*value))?;
