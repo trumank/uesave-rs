@@ -20,6 +20,7 @@ thiserror = "1.0.40"
 shell-words = "1.1.0"
 edit = "0.1.4"
 indexmap = { version = "1.9.3", features = ["serde"] }
+flate2 = "1.0.26"
 
 [dev-dependencies]
 pretty_assertions = "1.3.0"

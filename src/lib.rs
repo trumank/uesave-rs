@@ -728,7 +728,7 @@ impl<R: Read + Seek> Readable<R> for Text {
                     unknown,
                     table: read_string(reader)?,
                     entry: flag.then(|| read_string(reader)).transpose()?,
-                    another: flag.then(|| read_string(reader)).transpose()?,
+                    another: Some(read_string(reader)?), //flag.then(|| read_string(reader)).transpose()?,
                 }
             }),
             2 => Ok(Self::CultureInvariant {
@@ -1738,7 +1738,7 @@ impl<W: Write> Writable<W> for CustomFormatData {
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Header {
-    pub magic: u32,
+    pub magic: u64,
     pub save_game_version: u32,
     pub package_version: u32,
     pub engine_version_major: u16,
@@ -1746,13 +1746,11 @@ pub struct Header {
     pub engine_version_patch: u16,
     pub engine_version_build: u32,
     pub engine_version: String,
-    pub custom_format_version: u32,
-    pub custom_format: Vec<CustomFormatData>,
 }
 impl<R: Read + Seek> Readable<R> for Header {
     fn read(reader: &mut R) -> TResult<Self> {
-        let magic = reader.read_u32::<LE>()?;
-        if magic != u32::from_le_bytes(*b"GVAS") {
+        let magic = reader.read_u64::<LE>()?;
+        if magic != u64::from_le_bytes(*b"GEVASEND") {
             eprintln!(
                 "Found non-standard magic: {:02x?} ({}) expected: GVAS, continuing to parse...",
                 &magic.to_le_bytes(),
@@ -1767,15 +1765,13 @@ impl<R: Read + Seek> Readable<R> for Header {
             engine_version_minor: reader.read_u16::<LE>()?,
             engine_version_patch: reader.read_u16::<LE>()?,
             engine_version_build: reader.read_u32::<LE>()?,
-            engine_version: read_string(reader)?,
-            custom_format_version: reader.read_u32::<LE>()?,
-            custom_format: read_array(reader.read_u32::<LE>()?, reader, CustomFormatData::read)?,
+            engine_version: dbg!(read_string(reader)?),
         })
     }
 }
 impl<W: Write> Writable<W> for Header {
     fn write(&self, writer: &mut W) -> TResult<()> {
-        writer.write_u32::<LE>(self.magic)?;
+        writer.write_u64::<LE>(self.magic)?;
         writer.write_u32::<LE>(self.save_game_version)?;
         writer.write_u32::<LE>(self.package_version)?;
         writer.write_u16::<LE>(self.engine_version_major)?;
@@ -1783,11 +1779,6 @@ impl<W: Write> Writable<W> for Header {
         writer.write_u16::<LE>(self.engine_version_patch)?;
         writer.write_u32::<LE>(self.engine_version_build)?;
         write_string(writer, &self.engine_version)?;
-        writer.write_u32::<LE>(self.custom_format_version)?;
-        writer.write_u32::<LE>(self.custom_format.len() as u32)?;
-        for cf in &self.custom_format {
-            cf.write(writer)?;
-        }
         Ok(())
     }
 }
@@ -1796,18 +1787,34 @@ impl<W: Write> Writable<W> for Header {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Root {
     pub save_game_type: String,
+    pub header: [u8; 12],
     pub properties: Properties,
 }
 impl Root {
     fn read<R: Read + Seek>(context: &Context, reader: &mut R) -> TResult<Self> {
+        let save_game_type = read_string(reader)?;
+        let _uncompressed_size = reader.read_u32::<LE>()?;
+        let mut reader = SeekReader::new(flate2::read::ZlibDecoder::new(reader));
+        let mut header = [0; 12];
+        reader.read_exact(&mut header)?;
         Ok(Self {
-            save_game_type: read_string(reader)?,
-            properties: read_properties_until_none(context, reader)?,
+            save_game_type,
+            header,
+            properties: read_properties_until_none(context, &mut reader)?,
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         write_string(writer, &self.save_game_type)?;
-        write_properties_none_terminated(writer, &self.properties)?;
+        let mut buffer = vec![];
+        {
+            let mut writer =
+                flate2::write::ZlibEncoder::new(&mut buffer, flate2::Compression::default());
+            writer.write_all(&self.header)?;
+            write_properties_none_terminated(&mut writer, &self.properties)?;
+            writer.finish()?;
+        }
+        writer.write_u32::<LE>(buffer.len() as u32)?;
+        writer.write_all(&buffer)?;
         Ok(())
     }
 }
