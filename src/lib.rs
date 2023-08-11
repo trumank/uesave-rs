@@ -279,6 +279,7 @@ impl<'t, 'n> Context<'t, 'n> {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PropertyType {
     IntProperty,
+    Int16Property,
     Int64Property,
     UInt32Property,
     FloatProperty,
@@ -302,6 +303,7 @@ impl PropertyType {
     fn get_name(&self) -> &str {
         match &self {
             PropertyType::IntProperty => "IntProperty",
+            PropertyType::Int16Property => "Int16Property",
             PropertyType::Int64Property => "Int64Property",
             PropertyType::UInt32Property => "UInt32Property",
             PropertyType::FloatProperty => "FloatProperty",
@@ -326,6 +328,7 @@ impl PropertyType {
         let t = read_string(reader)?;
         match t.as_str() {
             "IntProperty" => Ok(PropertyType::IntProperty),
+            "Int16Property" => Ok(PropertyType::Int16Property),
             "Int64Property" => Ok(PropertyType::Int64Property),
             "UInt32Property" => Ok(PropertyType::UInt32Property),
             "FloatProperty" => Ok(PropertyType::FloatProperty),
@@ -435,6 +438,7 @@ impl StructType {
 
 type DateTime = u64;
 type Int = i32;
+type Int16 = i16;
 type Int64 = i64;
 type UInt32 = u32;
 type Float = f32;
@@ -798,6 +802,7 @@ pub enum ByteArray {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum PropertyValue {
     Int(Int),
+    Int16(Int16),
     Int64(Int64),
     UInt32(UInt32),
     Float(Float),
@@ -834,6 +839,7 @@ pub enum StructValue {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ValueVec {
     Int(Vec<Int>),
+    Int16(Vec<Int16>),
     Int64(Vec<Int64>),
     UInt32(Vec<UInt32>),
     Float(Vec<Float>),
@@ -876,6 +882,7 @@ impl PropertyValue {
     ) -> TResult<PropertyValue> {
         Ok(match t {
             PropertyType::IntProperty => PropertyValue::Int(reader.read_i32::<LE>()?),
+            PropertyType::Int16Property => PropertyValue::Int16(reader.read_i16::<LE>()?),
             PropertyType::Int64Property => PropertyValue::Int64(reader.read_i64::<LE>()?),
             PropertyType::UInt32Property => PropertyValue::UInt32(reader.read_u32::<LE>()?),
             PropertyType::FloatProperty => PropertyValue::Float(reader.read_f32::<LE>()?),
@@ -898,6 +905,7 @@ impl PropertyValue {
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         match &self {
             PropertyValue::Int(v) => writer.write_i32::<LE>(*v)?,
+            PropertyValue::Int16(v) => writer.write_i16::<LE>(*v)?,
             PropertyValue::Int64(v) => writer.write_i64::<LE>(*v)?,
             PropertyValue::UInt32(v) => writer.write_u32::<LE>(*v)?,
             PropertyValue::Float(v) => writer.write_f32::<LE>(*v)?,
@@ -981,6 +989,9 @@ impl ValueVec {
             PropertyType::IntProperty => {
                 ValueVec::Int(read_array(count, reader, |r| Ok(r.read_i32::<LE>()?))?)
             }
+            PropertyType::Int16Property => {
+                ValueVec::Int16(read_array(count, reader, |r| Ok(r.read_i16::<LE>()?))?)
+            }
             PropertyType::Int64Property => {
                 ValueVec::Int64(read_array(count, reader, |r| Ok(r.read_i64::<LE>()?))?)
             }
@@ -1029,6 +1040,12 @@ impl ValueVec {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
                     writer.write_i32::<LE>(*i)?;
+                }
+            }
+            ValueVec::Int16(v) => {
+                writer.write_u32::<LE>(v.len() as u32)?;
+                for i in v {
+                    writer.write_i16::<LE>(*i)?;
                 }
             }
             ValueVec::Int64(v) => {
@@ -1204,6 +1221,11 @@ pub enum Property {
         id: Option<uuid::Uuid>,
         value: Int,
     },
+    Int16 {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<uuid::Uuid>,
+        value: Int16,
+    },
     Int64 {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
@@ -1309,6 +1331,7 @@ impl Property {
     fn get_type(&self) -> PropertyType {
         match &self {
             Property::Int { .. } => PropertyType::IntProperty,
+            Property::Int16 { .. } => PropertyType::Int16Property,
             Property::Int64 { .. } => PropertyType::Int64Property,
             Property::UInt32 { .. } => PropertyType::UInt32Property,
             Property::Float { .. } => PropertyType::FloatProperty,
@@ -1341,6 +1364,10 @@ impl Property {
             PropertyType::IntProperty => Ok(Property::Int {
                 id: read_optional_uuid(reader)?,
                 value: reader.read_i32::<LE>()?,
+            }),
+            PropertyType::Int16Property => Ok(Property::Int16 {
+                id: read_optional_uuid(reader)?,
+                value: reader.read_i16::<LE>()?,
             }),
             PropertyType::Int64Property => Ok(Property::Int64 {
                 id: read_optional_uuid(reader)?,
@@ -1507,6 +1534,11 @@ impl Property {
                 write_optional_uuid(writer, *id)?;
                 writer.write_i32::<LE>(*value)?;
                 4
+            }
+            Property::Int16 { id, value } => {
+                write_optional_uuid(writer, *id)?;
+                writer.write_i16::<LE>(*value)?;
+                2
             }
             Property::Int64 { id, value } => {
                 write_optional_uuid(writer, *id)?;
