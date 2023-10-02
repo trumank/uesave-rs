@@ -16,7 +16,7 @@ text JSON format which can be used for manual save editing.
 
 ```console
 $ cargo install --git https://github.com/trumank/uesave-rs.git
-$ usave --help
+$ uesave --help
 Usage: uesave <COMMAND>
 
 Commands:
