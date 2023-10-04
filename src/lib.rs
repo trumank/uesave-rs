@@ -72,9 +72,31 @@ impl<R: Read> Seek for SeekReader<R> {
 impl<R: Read> Read for SeekReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.reader.read(buf).map(|s| {
+            for byte in buf {
+                *byte ^= 0xFF;
+            }
             self.read_bytes += s;
             s
         })
+    }
+}
+
+struct FlipWriter<W: Write> {
+    writer: W,
+}
+
+impl<W: Write> FlipWriter<W> {
+    fn new(writer: W) -> Self {
+        Self { writer }
+    }
+}
+impl<W: Write> Write for FlipWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.writer
+            .write(&buf.iter().cloned().map(|b| b ^ 0xFF).collect::<Vec<_>>())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
     }
 }
 
@@ -1851,8 +1873,9 @@ impl Save {
         })
     }
     pub fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
-        self.header.write(writer)?;
-        self.root.write(writer)?;
+        let mut writer = FlipWriter::new(writer);
+        self.header.write(&mut writer)?;
+        self.root.write(&mut writer)?;
         writer.write_all(&self.extra)?;
         Ok(())
     }
