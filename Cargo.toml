@@ -27,6 +27,8 @@ thiserror = "1.0.56"
 shell-words = "1.1.0"
 edit = "0.1.5"
 indexmap = { version = "2.1.0", features = ["serde"] }
+tracing = "0.1.37"
+ser-hex = { git = "https://github.com/trumank/ser-hex.git", version = "0.1.0" }
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
