@@ -696,90 +696,330 @@ impl IntPoint {
         Ok(())
     }
 }
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum Text {
-    StringTableEntry {
-        unknown: u32,
-        table: String,
-        entry: Option<String>,
-        another: Option<String>,
+pub struct FFormatArgumentData {
+    name: String,
+    value: FFormatArgumentDataValue,
+}
+impl<R: Read + Seek> Readable<R> for FFormatArgumentData {
+    fn read(reader: &mut R) -> TResult<Self> {
+        Ok(Self {
+            name: read_string(reader)?,
+            value: FFormatArgumentDataValue::read(reader)?,
+        })
+    }
+}
+impl<W: Write> Writable<W> for FFormatArgumentData {
+    fn write(&self, writer: &mut W) -> TResult<()> {
+        write_string(writer, &self.name)?;
+        self.value.write(writer)?;
+        Ok(())
+    }
+}
+// very similar to FFormatArgumentValue but serializes ints as 32 bits (TODO changes to 64 bit
+// again at some later UE version)
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum FFormatArgumentDataValue {
+    Int(i32),
+    UInt(u32),
+    Float(f32),
+    Double(f64),
+    Text(std::boxed::Box<Text>),
+    Gender(u64),
+}
+impl<R: Read + Seek> Readable<R> for FFormatArgumentDataValue {
+    fn read(reader: &mut R) -> TResult<Self> {
+        let type_ = reader.read_u8()?;
+        match type_ {
+            0 => Ok(Self::Int(reader.read_i32::<LE>()?)),
+            1 => Ok(Self::UInt(reader.read_u32::<LE>()?)),
+            2 => Ok(Self::Float(reader.read_f32::<LE>()?)),
+            3 => Ok(Self::Double(reader.read_f64::<LE>()?)),
+            4 => Ok(Self::Text(std::boxed::Box::new(Text::read(reader)?))),
+            5 => Ok(Self::Gender(reader.read_u64::<LE>()?)),
+            _ => Err(Error::Other(format!(
+                "unimplemented variant for FFormatArgumentDataValue 0x{type_:x}"
+            ))),
+        }
+    }
+}
+impl<W: Write> Writable<W> for FFormatArgumentDataValue {
+    fn write(&self, writer: &mut W) -> TResult<()> {
+        match self {
+            Self::Int(value) => {
+                writer.write_u8(0)?;
+                writer.write_i32::<LE>(*value)?;
+            }
+            Self::UInt(value) => {
+                writer.write_u8(1)?;
+                writer.write_u32::<LE>(*value)?;
+            }
+            Self::Float(value) => {
+                writer.write_u8(2)?;
+                writer.write_f32::<LE>(*value)?;
+            }
+            Self::Double(value) => {
+                writer.write_u8(3)?;
+                writer.write_f64::<LE>(*value)?;
+            }
+            Self::Text(value) => {
+                writer.write_u8(4)?;
+                value.write(writer)?;
+            }
+            Self::Gender(value) => {
+                writer.write_u8(5)?;
+                writer.write_u64::<LE>(*value)?;
+            }
+        };
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum FFormatArgumentValue {
+    Int(i64),
+    UInt(u64),
+    Float(f32),
+    Double(f64),
+    Text(std::boxed::Box<Text>),
+    Gender(u64),
+}
+
+impl<R: Read + Seek> Readable<R> for FFormatArgumentValue {
+    fn read(reader: &mut R) -> TResult<Self> {
+        let type_ = reader.read_u8()?;
+        match type_ {
+            0 => Ok(Self::Int(reader.read_i64::<LE>()?)),
+            1 => Ok(Self::UInt(reader.read_u64::<LE>()?)),
+            2 => Ok(Self::Float(reader.read_f32::<LE>()?)),
+            3 => Ok(Self::Double(reader.read_f64::<LE>()?)),
+            4 => Ok(Self::Text(std::boxed::Box::new(Text::read(reader)?))),
+            5 => Ok(Self::Gender(reader.read_u64::<LE>()?)),
+            _ => Err(Error::Other(format!(
+                "unimplemented variant for FFormatArgumentValue 0x{type_:x}"
+            ))),
+        }
+    }
+}
+impl<W: Write> Writable<W> for FFormatArgumentValue {
+    fn write(&self, writer: &mut W) -> TResult<()> {
+        match self {
+            Self::Int(value) => {
+                writer.write_u8(0)?;
+                writer.write_i64::<LE>(*value)?;
+            }
+            Self::UInt(value) => {
+                writer.write_u8(1)?;
+                writer.write_u64::<LE>(*value)?;
+            }
+            Self::Float(value) => {
+                writer.write_u8(2)?;
+                writer.write_f32::<LE>(*value)?;
+            }
+            Self::Double(value) => {
+                writer.write_u8(3)?;
+                writer.write_f64::<LE>(*value)?;
+            }
+            Self::Text(value) => {
+                writer.write_u8(4)?;
+                value.write(writer)?;
+            }
+            Self::Gender(value) => {
+                writer.write_u8(5)?;
+                writer.write_u64::<LE>(*value)?;
+            }
+        };
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct FNumberFormattingOptions {
+    always_sign: bool,
+    use_grouping: bool,
+    rounding_mode: i8, // TODO enum ERoundingMode
+    minimum_integral_digits: i32,
+    maximum_integral_digits: i32,
+    minimum_fractional_digits: i32,
+    maximum_fractional_digits: i32,
+}
+impl<R: Read + Seek> Readable<R> for FNumberFormattingOptions {
+    fn read(reader: &mut R) -> TResult<Self> {
+        Ok(Self {
+            always_sign: reader.read_u32::<LE>()? != 0,
+            use_grouping: reader.read_u32::<LE>()? != 0,
+            rounding_mode: reader.read_i8()?,
+            minimum_integral_digits: reader.read_i32::<LE>()?,
+            maximum_integral_digits: reader.read_i32::<LE>()?,
+            minimum_fractional_digits: reader.read_i32::<LE>()?,
+            maximum_fractional_digits: reader.read_i32::<LE>()?,
+        })
+    }
+}
+impl<W: Write> Writable<W> for FNumberFormattingOptions {
+    fn write(&self, writer: &mut W) -> TResult<()> {
+        writer.write_u32::<LE>(self.always_sign as u32)?;
+        writer.write_u32::<LE>(self.use_grouping as u32)?;
+        writer.write_i8(self.rounding_mode)?;
+        writer.write_i32::<LE>(self.minimum_integral_digits)?;
+        writer.write_i32::<LE>(self.maximum_integral_digits)?;
+        writer.write_i32::<LE>(self.minimum_fractional_digits)?;
+        writer.write_i32::<LE>(self.maximum_fractional_digits)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Text {
+    flags: u32,
+    variant: TextVariant,
+}
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum TextVariant {
+    // -0x1
+    None {
+        culture_invariant: Option<String>,
     },
-    CultureInvariant {
-        unknown: u64,
-        value: String,
-    },
-    Localized {
-        unknown: u32,
+    // 0x0
+    Base {
         namespace: String,
         key: String,
-        value: String,
+        source_string: String,
+    },
+    // 0x3
+    ArgumentFormat {
+        // aka ArgumentDataFormat
+        format_text: std::boxed::Box<Text>,
+        arguments: Vec<FFormatArgumentData>,
+    },
+    // 0x4
+    AsNumber {
+        source_value: FFormatArgumentValue,
+        format_options: Option<FNumberFormattingOptions>,
+        culture_name: String,
+    },
+    // 0x7
+    AsDate {
+        source_date_time: DateTime,
+        date_style: i8, // TODO EDateTimeStyle::Type
+        time_zone: String,
+        culture_name: String,
+    },
+    StringTableEntry {
+        // 0xb
+        table: String,
+        key: String,
     },
 }
+
 impl<R: Read + Seek> Readable<R> for Text {
     fn read(reader: &mut R) -> TResult<Self> {
-        match reader.read_u8()? {
-            0 => Ok({
-                // TODO I really really have no idea what I'm doing an should take some time to
-                // actually read the source
-                let unknown = reader.read_u32::<LE>()?;
-                let flag = (unknown >> 24) == 0;
-
-                Self::StringTableEntry {
-                    unknown,
-                    table: read_string(reader)?,
-                    entry: flag.then(|| read_string(reader)).transpose()?,
-                    another: flag.then(|| read_string(reader)).transpose()?,
-                }
+        let flags = reader.read_u32::<LE>()?;
+        let text_history_type = reader.read_i8()?;
+        let variant = match text_history_type {
+            -0x1 => Ok(TextVariant::None {
+                culture_invariant: (reader.read_u32::<LE>()? != 0) // bHasCultureInvariantString
+                    .then(|| read_string(reader))
+                    .transpose()?,
             }),
-            2 => Ok(Self::CultureInvariant {
-                unknown: reader.read_u64::<LE>()?,
-                value: read_string(reader)?,
-            }),
-            8 => Ok(Self::Localized {
-                unknown: reader.read_u32::<LE>()?,
+            0x0 => Ok(TextVariant::Base {
                 namespace: read_string(reader)?,
                 key: read_string(reader)?,
-                value: read_string(reader)?,
+                source_string: read_string(reader)?,
             }),
-            _ => Err(Error::Other("unknown flag for Text")),
-        }
+            0x3 => Ok(TextVariant::ArgumentFormat {
+                format_text: std::boxed::Box::new(Text::read(reader)?),
+                arguments: read_array(reader.read_u32::<LE>()?, reader, FFormatArgumentData::read)?,
+            }),
+            0x4 => Ok(TextVariant::AsNumber {
+                source_value: FFormatArgumentValue::read(reader)?,
+                format_options:
+                    (reader.read_u32::<LE>()? != 0) // bHasFormatOptions
+                        .then(|| FNumberFormattingOptions::read(reader))
+                        .transpose()?,
+                culture_name: read_string(reader)?,
+            }),
+            0x7 => Ok(TextVariant::AsDate {
+                source_date_time: reader.read_u64::<LE>()?,
+                date_style: reader.read_i8()?,
+                time_zone: read_string(reader)?,
+                culture_name: read_string(reader)?,
+            }),
+            0xb => Ok({
+                TextVariant::StringTableEntry {
+                    table: read_string(reader)?,
+                    key: read_string(reader)?,
+                }
+            }),
+            _ => Err(Error::Other(format!(
+                "unimplemented variant for FTextHistory 0x{text_history_type:x}"
+            ))),
+        }?;
+        Ok(Self { flags, variant })
     }
 }
 impl<W: Write> Writable<W> for Text {
     fn write(&self, writer: &mut W) -> TResult<()> {
-        match self {
-            Self::StringTableEntry {
-                unknown,
-                table,
-                entry,
-                another,
-            } => {
-                writer.write_u8(0)?;
-                writer.write_u32::<LE>(*unknown)?;
-                write_string(writer, table)?;
-                if let Some(s) = entry {
-                    write_string_always_trailing(writer, s)?
-                };
-                if let Some(s) = another {
-                    write_string_always_trailing(writer, s)?
-                };
+        writer.write_u32::<LE>(self.flags)?;
+        match &self.variant {
+            TextVariant::None { culture_invariant } => {
+                writer.write_i8(-0x1)?;
+                writer.write_u32::<LE>(culture_invariant.is_some() as u32)?;
+                if let Some(culture_invariant) = culture_invariant {
+                    write_string(writer, culture_invariant)?;
+                }
             }
-            Self::CultureInvariant { unknown, value } => {
-                writer.write_u8(2)?;
-                writer.write_u64::<LE>(*unknown)?;
-                write_string(writer, value)?;
-            }
-            Self::Localized {
-                unknown,
+            TextVariant::Base {
                 namespace,
                 key,
-                value,
+                source_string,
             } => {
-                writer.write_u8(8)?;
-                writer.write_u32::<LE>(*unknown)?;
-                write_string(writer, namespace)?;
-                write_string_always_trailing(writer, key)?;
-                write_string_always_trailing(writer, value)?;
+                writer.write_i8(0x0)?;
+                write_string_always_trailing(writer, namespace)?;
+                write_string(writer, key)?;
+                write_string(writer, source_string)?;
+            }
+            TextVariant::ArgumentFormat {
+                format_text,
+                arguments,
+            } => {
+                writer.write_i8(0x3)?;
+                format_text.write(writer)?;
+                writer.write_u32::<LE>(arguments.len() as u32)?;
+                for a in arguments {
+                    a.write(writer)?;
+                }
+            }
+            TextVariant::AsNumber {
+                source_value,
+                format_options,
+                culture_name,
+            } => {
+                writer.write_i8(0x4)?;
+                source_value.write(writer)?;
+                writer.write_u32::<LE>(format_options.is_some() as u32)?;
+                if let Some(format_options) = format_options {
+                    format_options.write(writer)?;
+                }
+                write_string(writer, culture_name)?;
+            }
+            TextVariant::AsDate {
+                source_date_time,
+                date_style,
+                time_zone,
+                culture_name,
+            } => {
+                writer.write_i8(0x7)?;
+                writer.write_u64::<LE>(*source_date_time)?;
+                writer.write_i8(*date_style)?;
+                write_string(writer, time_zone)?;
+                write_string(writer, culture_name)?;
+            }
+            TextVariant::StringTableEntry { table, key } => {
+                writer.write_i8(0xb)?;
+                write_string(writer, table)?;
+                write_string(writer, key)?;
             }
         }
         Ok(())
