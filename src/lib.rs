@@ -899,7 +899,7 @@ impl PropertyValue {
             PropertyType::StructProperty => {
                 PropertyValue::Struct(StructValue::read(context, st.as_ref().unwrap(), reader)?)
             }
-            _ => todo!("{:?}", t),
+            _ => return Err(Error::Other(format!("unimplemented property {t:?}"))),
         })
     }
     fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {

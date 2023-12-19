@@ -11,7 +11,7 @@ pub enum Error {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("{0}")]
-    Other(&'static str),
+    Other(String),
 }
 
 #[derive(thiserror::Error, Debug)]
