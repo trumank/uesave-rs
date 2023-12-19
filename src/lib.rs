@@ -976,6 +976,7 @@ impl<W: Write> Writable<W> for Text {
                 source_string,
             } => {
                 writer.write_i8(0x0)?;
+                // TODO sometimes trailing sometimes not?
                 write_string_always_trailing(writer, namespace)?;
                 write_string(writer, key)?;
                 write_string(writer, source_string)?;
