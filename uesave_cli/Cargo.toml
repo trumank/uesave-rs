@@ -26,3 +26,4 @@ clap = { version = "4.4.16", features = ["derive"] }
 serde_json = { version = "1.0.111", features = ["preserve_order"] }
 tempfile = "3.9.0"
 edit = "0.1.5"
+ser-hex = { git = "https://github.com/trumank/ser-hex", version = "0.1.0" }
