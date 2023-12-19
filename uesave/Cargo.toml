@@ -16,6 +16,7 @@ serde = { version = "1.0.195", features = ["derive"] }
 thiserror = "1.0.56"
 indexmap = { version = "2.1.0", features = ["serde"] }
 bitflags = "2.6.0"
+tracing = "0.1.37"
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
