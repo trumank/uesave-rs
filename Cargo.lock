@@ -523,6 +523,7 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "thiserror",
+ "tracing",
  "uuid",
 ]
 

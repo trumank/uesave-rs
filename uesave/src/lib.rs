@@ -42,6 +42,8 @@ use std::{
 
 use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 
+use tracing::instrument;
+
 type TResult<T> = Result<T, Error>;
 
 trait Readable<R: Read + Seek> {
@@ -80,6 +82,7 @@ impl<R: Read> Read for SeekReader<R> {
     }
 }
 
+#[instrument(skip_all)]
 fn read_optional_uuid<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Option<uuid::Uuid>> {
     Ok(if reader.read_u8()? > 0 {
         Some(uuid::Uuid::read(reader)?)
@@ -97,6 +100,7 @@ fn write_optional_uuid<W: Write>(writer: &mut Context<W>, id: Option<uuid::Uuid>
     Ok(())
 }
 
+#[instrument(skip_all, ret)]
 fn read_string<R: Read + Seek>(reader: &mut Context<R>) -> TResult<String> {
     let len = reader.read_i32::<LE>()?;
     if len < 0 {
@@ -110,6 +114,7 @@ fn read_string<R: Read + Seek>(reader: &mut Context<R>) -> TResult<String> {
         Ok(String::from_utf8_lossy(&chars[..length]).into_owned())
     }
 }
+#[instrument(skip(writer))]
 fn write_string<W: Write>(writer: &mut Context<W>, string: &str) -> TResult<()> {
     if string.is_empty() {
         writer.write_u32::<LE>(0)?;
@@ -119,6 +124,7 @@ fn write_string<W: Write>(writer: &mut Context<W>, string: &str) -> TResult<()> 
     Ok(())
 }
 
+#[instrument(skip_all, ret)]
 fn read_string_trailing<R: Read + Seek>(reader: &mut Context<R>) -> TResult<(String, Vec<u8>)> {
     let len = reader.read_i32::<LE>()?;
     if len < 0 {
@@ -163,6 +169,7 @@ fn read_string_trailing<R: Read + Seek>(reader: &mut Context<R>) -> TResult<(Str
         Ok((String::from_utf8(chars).unwrap(), rest))
     }
 }
+#[instrument(skip_all)]
 fn write_string_trailing<W: Write>(
     writer: &mut Context<W>,
     string: &str,
@@ -269,6 +276,7 @@ impl<'a> IntoIterator for &'a Properties {
     }
 }
 
+#[instrument(skip_all)]
 fn read_properties_until_none<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Properties> {
     let mut properties = Properties::default();
     while let Some((name, prop)) = read_property(reader)? {
@@ -276,6 +284,7 @@ fn read_properties_until_none<R: Read + Seek>(reader: &mut Context<R>) -> TResul
     }
     Ok(properties)
 }
+#[instrument(skip_all)]
 fn write_properties_none_terminated<W: Write>(
     writer: &mut Context<W>,
     properties: &Properties,
@@ -287,6 +296,7 @@ fn write_properties_none_terminated<W: Write>(
     Ok(())
 }
 
+#[instrument(skip_all)]
 fn read_property<R: Read + Seek>(
     reader: &mut Context<R>,
 ) -> TResult<Option<(PropertyKey, Property)>> {
@@ -297,6 +307,7 @@ fn read_property<R: Read + Seek>(
         Ok(None)
     }
 }
+#[instrument(skip_all)]
 fn write_property<W: Write>(
     prop: (&PropertyKey, &Property),
     writer: &mut Context<W>,
@@ -315,6 +326,7 @@ fn write_property<W: Write>(
     Ok(())
 }
 
+#[instrument(skip_all)]
 fn read_array<T, F, R: Read + Seek>(length: u32, reader: &mut Context<R>, f: F) -> TResult<Vec<T>>
 where
     F: Fn(&mut Context<R>) -> TResult<T>,
@@ -324,6 +336,7 @@ where
 
 #[rustfmt::skip]
 impl<R: Read + Seek> Readable<R> for uuid::Uuid {
+    #[instrument(name = "Uuid_read", skip_all)]
     fn read(reader: &mut Context<R>) -> TResult<uuid::Uuid> {
         let mut b = [0; 16];
         reader.read_exact(&mut b)?;
@@ -337,6 +350,7 @@ impl<R: Read + Seek> Readable<R> for uuid::Uuid {
 }
 #[rustfmt::skip]
 impl<W: Write> Writable<W> for uuid::Uuid {
+    #[instrument(name = "Uuid_write", skip_all)]
     fn write(&self, writer: &mut Context<W>) -> TResult<()> {
         let b = self.as_bytes();
         writer.write_all(&[
@@ -679,6 +693,7 @@ impl PropertyTagFull<'_> {
             data: self.data.into_partial(),
         }
     }
+    #[instrument(name = "PropertyTag_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Option<Self>> {
         let name = read_string(reader)?;
         if name == "None" {
@@ -1092,6 +1107,7 @@ impl PropertyType {
             PropertyType::StructProperty => "StructProperty",
         }
     }
+    #[instrument(name = "PropertyType_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Self::try_from(&read_string(reader)?)
     }
@@ -1262,6 +1278,7 @@ impl StructType {
             _ => unreachable!(),
         }
     }
+    #[instrument(name = "StructType_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(read_string(reader)?.into())
     }
@@ -1292,6 +1309,7 @@ pub struct MapEntry {
     pub value: PropertyValue,
 }
 impl MapEntry {
+    #[instrument(name = "MapEntry_read", skip_all)]
     fn read<R: Read + Seek>(
         reader: &mut Context<R>,
         key_type: &PropertyTagDataFull,
@@ -1314,6 +1332,7 @@ pub struct FieldPath {
     owner: String,
 }
 impl FieldPath {
+    #[instrument(name = "FieldPath_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self {
             path: read_array(reader.read_u32::<LE>()?, reader, read_string)?,
@@ -1336,6 +1355,7 @@ pub struct Delegate {
     path: String,
 }
 impl Delegate {
+    #[instrument(name = "Delegate_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self {
             name: read_string(reader)?,
@@ -1352,6 +1372,7 @@ impl Delegate {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct MulticastDelegate(Vec<Delegate>);
 impl MulticastDelegate {
+    #[instrument(name = "MulticastDelegate_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self(read_array(
             reader.read_u32::<LE>()?,
@@ -1371,6 +1392,7 @@ impl MulticastDelegate {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct MulticastInlineDelegate(Vec<Delegate>);
 impl MulticastInlineDelegate {
+    #[instrument(name = "MulticastInlineDelegate_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self(read_array(
             reader.read_u32::<LE>()?,
@@ -1390,6 +1412,7 @@ impl MulticastInlineDelegate {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct MulticastSparseDelegate(Vec<Delegate>);
 impl MulticastSparseDelegate {
+    #[instrument(name = "MulticastSparseDelegate_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self(read_array(
             reader.read_u32::<LE>()?,
@@ -1414,6 +1437,7 @@ pub struct LinearColor {
     pub a: f32,
 }
 impl LinearColor {
+    #[instrument(name = "LinearColor_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self {
             r: reader.read_f32::<LE>()?,
@@ -1438,6 +1462,7 @@ pub struct Quat {
     pub w: f64,
 }
 impl Quat {
+    #[instrument(name = "Quat_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         if reader.unwrap_header().large_world_coordinates() {
             Ok(Self {
@@ -1477,6 +1502,7 @@ pub struct Rotator {
     pub z: f64,
 }
 impl Rotator {
+    #[instrument(name = "Rotator_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         if reader.unwrap_header().large_world_coordinates() {
             Ok(Self {
@@ -1536,6 +1562,7 @@ pub struct Vector {
     pub z: f64,
 }
 impl Vector {
+    #[instrument(name = "Vector_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         if reader.unwrap_header().large_world_coordinates() {
             Ok(Self {
@@ -1570,6 +1597,7 @@ pub struct Vector2D {
     pub y: f64,
 }
 impl Vector2D {
+    #[instrument(name = "Vector2D_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         if reader.unwrap_header().large_world_coordinates() {
             Ok(Self {
@@ -1622,6 +1650,7 @@ pub struct Box {
     pub is_valid: bool,
 }
 impl Box {
+    #[instrument(name = "Box_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self {
             min: Vector::read(reader)?,
@@ -1642,6 +1671,7 @@ pub struct IntPoint {
     pub y: i32,
 }
 impl IntPoint {
+    #[instrument(name = "IntPoint_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self {
             x: reader.read_i32::<LE>()?,
@@ -1668,6 +1698,7 @@ pub enum SoftObjectPath {
     },
 }
 impl SoftObjectPath {
+    #[instrument(name = "SoftObjectPath_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         let is_new = reader
             .state
@@ -1718,6 +1749,7 @@ pub struct GameplayTag {
     pub name: String,
 }
 impl GameplayTag {
+    #[instrument(name = "GameplayTag_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self {
             name: read_string(reader)?,
@@ -1734,6 +1766,7 @@ pub struct GameplayTagContainer {
     pub gameplay_tags: Vec<GameplayTag>,
 }
 impl GameplayTagContainer {
+    #[instrument(name = "GameplayTagContainer_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self {
             gameplay_tags: read_array(reader.read_u32::<LE>()?, reader, GameplayTag::read)?,
@@ -1791,6 +1824,7 @@ pub struct FFormatArgumentData {
     value: FFormatArgumentDataValue,
 }
 impl<R: Read + Seek> Readable<R> for FFormatArgumentData {
+    #[instrument(name = "FFormatArgumentData_read", skip_all)]
     fn read(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self {
             name: read_string(reader)?,
@@ -1817,6 +1851,7 @@ pub enum FFormatArgumentDataValue {
     Gender(u64),
 }
 impl<R: Read + Seek> Readable<R> for FFormatArgumentDataValue {
+    #[instrument(name = "FFormatArgumentDataValue_read", skip_all)]
     fn read(reader: &mut Context<R>) -> TResult<Self> {
         let type_ = reader.read_u8()?;
         match type_ {
@@ -1833,6 +1868,7 @@ impl<R: Read + Seek> Readable<R> for FFormatArgumentDataValue {
     }
 }
 impl<W: Write> Writable<W> for FFormatArgumentDataValue {
+    #[instrument(name = "FFormatArgumentDataValue_write", skip_all)]
     fn write(&self, writer: &mut Context<W>) -> TResult<()> {
         match self {
             Self::Int(value) => {
@@ -1875,6 +1911,7 @@ pub enum FFormatArgumentValue {
 }
 
 impl<R: Read + Seek> Readable<R> for FFormatArgumentValue {
+    #[instrument(name = "FFormatArgumentValue_read", skip_all)]
     fn read(reader: &mut Context<R>) -> TResult<Self> {
         let type_ = reader.read_u8()?;
         match type_ {
@@ -1891,6 +1928,7 @@ impl<R: Read + Seek> Readable<R> for FFormatArgumentValue {
     }
 }
 impl<W: Write> Writable<W> for FFormatArgumentValue {
+    #[instrument(name = "FFormatArgumentValue_write", skip_all)]
     fn write(&self, writer: &mut Context<W>) -> TResult<()> {
         match self {
             Self::Int(value) => {
@@ -1933,6 +1971,7 @@ pub struct FNumberFormattingOptions {
     maximum_fractional_digits: i32,
 }
 impl<R: Read + Seek> Readable<R> for FNumberFormattingOptions {
+    #[instrument(name = "FNumberFormattingOptions_read", skip_all)]
     fn read(reader: &mut Context<R>) -> TResult<Self> {
         Ok(Self {
             always_sign: reader.read_u32::<LE>()? != 0,
@@ -1946,6 +1985,7 @@ impl<R: Read + Seek> Readable<R> for FNumberFormattingOptions {
     }
 }
 impl<W: Write> Writable<W> for FNumberFormattingOptions {
+    #[instrument(name = "FNumberFormattingOptions_write", skip_all)]
     fn write(&self, writer: &mut Context<W>) -> TResult<()> {
         writer.write_u32::<LE>(self.always_sign as u32)?;
         writer.write_u32::<LE>(self.use_grouping as u32)?;
@@ -2002,6 +2042,7 @@ pub enum TextVariant {
 }
 
 impl<R: Read + Seek> Readable<R> for Text {
+    #[instrument(name = "Text_read", skip_all)]
     fn read(reader: &mut Context<R>) -> TResult<Self> {
         let flags = reader.read_u32::<LE>()?;
         let text_history_type = reader.read_i8()?;
@@ -2215,6 +2256,7 @@ pub enum ValueSet {
 }
 
 impl PropertyValue {
+    #[instrument(name = "PropertyValue_read", skip_all)]
     fn read<R: Read + Seek>(
         reader: &mut Context<R>,
         t: &PropertyTagDataFull,
@@ -2278,6 +2320,7 @@ impl PropertyValue {
     }
 }
 impl StructValue {
+    #[instrument(name = "StructValue_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>, t: &StructType) -> TResult<StructValue> {
         Ok(match t {
             StructType::Guid => StructValue::Guid(uuid::Uuid::read(reader)?),
@@ -2328,6 +2371,7 @@ impl StructValue {
     }
 }
 impl ValueVec {
+    #[instrument(name = "ValueVec_read", skip_all)]
     fn read<R: Read + Seek>(
         reader: &mut Context<R>,
         t: &PropertyType,
@@ -2505,6 +2549,7 @@ impl ValueVec {
     }
 }
 impl ValueArray {
+    #[instrument(name = "ValueArray_read", skip_all)]
     fn read<R: Read + Seek>(
         reader: &mut Context<R>,
         tag: PropertyTagDataFull,
@@ -2577,6 +2622,7 @@ impl ValueArray {
     }
 }
 impl ValueSet {
+    #[instrument(name = "ValueSet_read", skip_all)]
     fn read<R: Read + Seek>(
         reader: &mut Context<R>,
         t: &PropertyTagDataFull,
@@ -2649,6 +2695,7 @@ pub enum PropertyInner {
 }
 
 impl Property {
+    #[instrument(name = "Property_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>, tag: PropertyTagFull) -> TResult<Property> {
         let inner = match &tag.data {
             PropertyTagDataFull::Bool(value) => PropertyInner::Bool(*value),
@@ -2886,6 +2933,7 @@ pub struct CustomFormatData {
     pub value: i32,
 }
 impl<R: Read + Seek> Readable<R> for CustomFormatData {
+    #[instrument(name = "CustomFormatData_read", skip_all)]
     fn read(reader: &mut Context<R>) -> TResult<Self> {
         Ok(CustomFormatData {
             id: uuid::Uuid::read(reader)?,
@@ -2929,6 +2977,7 @@ impl Header {
     }
 }
 impl<R: Read + Seek> Readable<R> for Header {
+    #[instrument(name = "Header_read", skip_all)]
     fn read(reader: &mut Context<R>) -> TResult<Self> {
         let magic = reader.read_u32::<LE>()?;
         if magic != u32::from_le_bytes(*b"GVAS") {
@@ -2960,6 +3009,7 @@ impl<R: Read + Seek> Readable<R> for Header {
     }
 }
 impl<W: Write> Writable<W> for Header {
+    #[instrument(name = "Header_write", skip_all)]
     fn write(&self, writer: &mut Context<W>) -> TResult<()> {
         writer.write_u32::<LE>(self.magic)?;
         writer.write_u32::<LE>(self.save_game_version)?;
@@ -2988,6 +3038,7 @@ pub struct Root {
     pub properties: Properties,
 }
 impl Root {
+    #[instrument(name = "Root_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         let save_game_type = read_string(reader)?;
         if reader.unwrap_header().property_tag() {
@@ -2999,6 +3050,7 @@ impl Root {
             properties,
         })
     }
+    #[instrument(name = "Root_write", skip_all)]
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
         write_string(writer, &self.save_game_type)?;
         if writer.unwrap_header().property_tag() {
@@ -3017,10 +3069,12 @@ pub struct Save {
 }
 impl Save {
     /// Reads save from the given reader
+    #[instrument(name = "Save_read", skip_all)]
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, ParseError> {
         Self::read_with_types(reader, &Types::new())
     }
     /// Reads save from the given reader using the provided [`Types`]
+    #[instrument(name = "Save_read_with_types", skip_all)]
     pub fn read_with_types<R: Read>(reader: &mut R, types: &Types) -> Result<Self, ParseError> {
         let mut reader = SeekReader::new(reader);
 
@@ -3053,6 +3107,7 @@ impl Save {
             error: e,
         })
     }
+    #[instrument(name = "Save_write", skip_all)]
     pub fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         Context::run(writer, |writer| {
             writer.header(&self.header, |writer| {

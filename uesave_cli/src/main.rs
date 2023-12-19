@@ -135,7 +135,12 @@ pub fn main() -> Result<()> {
 
             let mut input = std::io::Cursor::new(fs::read(path)?);
             let mut output = std::io::Cursor::new(vec![]);
-            Save::read_with_types(&mut input, &types)?.write(&mut output)?;
+
+            ser_hex::read("trace.json", &mut input, |reader| {
+                Save::read_with_types(reader, &types)
+            })?
+            .write(&mut output)?;
+
             let (input, output) = (input.into_inner(), output.into_inner());
             if input != output {
                 if action.debug {
