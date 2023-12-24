@@ -381,6 +381,7 @@ impl PropertyType {
 pub enum StructType {
     Guid,
     DateTime,
+    Timespan,
     Vector2D,
     Vector,
     Box,
@@ -397,6 +398,7 @@ impl From<&str> for StructType {
         match t {
             "Guid" => StructType::Guid,
             "DateTime" => StructType::DateTime,
+            "Timespan" => StructType::Timespan,
             "Vector2D" => StructType::Vector2D,
             "Vector" => StructType::Vector,
             "Box" => StructType::Box,
@@ -416,6 +418,7 @@ impl From<String> for StructType {
         match t.as_str() {
             "Guid" => StructType::Guid,
             "DateTime" => StructType::DateTime,
+            "Timespan" => StructType::Timespan,
             "Vector2D" => StructType::Vector2D,
             "Vector" => StructType::Vector,
             "Box" => StructType::Box,
@@ -440,6 +443,7 @@ impl StructType {
             match &self {
                 StructType::Guid => "Guid",
                 StructType::DateTime => "DateTime",
+                StructType::Timespan => "Timespan",
                 StructType::Vector2D => "Vector2D",
                 StructType::Vector => "Vector",
                 StructType::Box => "Box",
@@ -458,6 +462,7 @@ impl StructType {
 }
 
 type DateTime = u64;
+type Timespan = i64;
 type Int8 = i8;
 type Int16 = i16;
 type Int = i32;
@@ -1131,6 +1136,7 @@ pub enum PropertyValue {
 pub enum StructValue {
     Guid(uuid::Uuid),
     DateTime(DateTime),
+    Timespan(Timespan),
     Vector2D(Vector2D),
     Vector(Vector),
     Box(Box),
@@ -1259,6 +1265,7 @@ impl StructValue {
         Ok(match t {
             StructType::Guid => StructValue::Guid(uuid::Uuid::read(reader)?),
             StructType::DateTime => StructValue::DateTime(reader.read_u64::<LE>()?),
+            StructType::Timespan => StructValue::Timespan(reader.read_i64::<LE>()?),
             StructType::Vector2D => StructValue::Vector2D(Vector2D::read(reader)?),
             StructType::Vector => StructValue::Vector(Vector::read(reader)?),
             StructType::Box => StructValue::Box(Box::read(reader)?),
@@ -1279,6 +1286,7 @@ impl StructValue {
         match self {
             StructValue::Guid(v) => v.write(writer)?,
             StructValue::DateTime(v) => writer.write_u64::<LE>(*v)?,
+            StructValue::Timespan(v) => writer.write_i64::<LE>(*v)?,
             StructValue::Vector2D(v) => v.write(writer)?,
             StructValue::Vector(v) => v.write(writer)?,
             StructValue::Box(v) => v.write(writer)?,
