@@ -2015,22 +2015,18 @@ impl Property {
                 let count = reader.read_u32::<LE>()?;
                 let mut value = vec![];
 
-                let key_struct_type = reader.scope("Key", |reader| -> TResult<_> {
-                    Ok(match key_type {
-                        PropertyType::StructProperty => {
-                            Some(reader.get_type_or(&StructType::Guid)?)
-                        }
-                        _ => None,
-                    })
-                })?;
-                let value_struct_type = reader.scope("Value", |reader| -> TResult<_> {
-                    Ok(match key_type {
-                        PropertyType::StructProperty => {
-                            Some(reader.get_type_or(&StructType::Struct(None))?)
-                        }
-                        _ => None,
-                    })
-                })?;
+                let key_struct_type = match key_type {
+                    PropertyType::StructProperty => {
+                        Some(reader.scope("Key", |r| r.get_type_or(&StructType::Guid))?)
+                    }
+                    _ => None,
+                };
+                let value_struct_type = match value_type {
+                    PropertyType::StructProperty => {
+                        Some(reader.scope("Value", |r| r.get_type_or(&StructType::Struct(None)))?)
+                    }
+                    _ => None,
+                };
 
                 for _ in 0..count {
                     value.push(MapEntry::read(
