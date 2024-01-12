@@ -2,6 +2,7 @@
 name = "uesave"
 version = "0.2.1"
 edition = "2021"
+authors = ["trumank"]
 repository = "https://github.com/trumank/uesave-rs"
 homepage = "https://github.com/trumank/uesave-rs"
 description = "Unreal Engine save file (GVAS) reading/writing"
