@@ -9,6 +9,12 @@ description = "Unreal Engine save file (GVAS) reading/writing"
 keywords = ["unreal-engine", "save", "gvas"]
 license = "MIT"
 
+[package.metadata.wix]
+upgrade-guid = "DC644268-641B-4213-932C-2BC756847797"
+path-guid = "C7E7AFCF-192B-4F04-8C80-F036DC47733C"
+license = false
+eula = false
+
 [dependencies]
 byteorder = "1.4.3"
 uuid = { version = "1.3.3", features = ["serde"] }
@@ -30,3 +36,16 @@ pretty_assertions = "1.3.0"
 inherits = "release"
 debug = true
 split-debuginfo = "packed"
+
+# Config for 'cargo dist'
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.7.1"
+# CI backends to support
+ci = ["github"]
+# The installers to generate for each app
+installers = ["shell", "powershell", "msi"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-pc-windows-msvc"]
+# Publish jobs to run in CI
+pr-run-mode = "plan"
