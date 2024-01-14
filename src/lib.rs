@@ -477,6 +477,7 @@ pub enum StructType {
     LinearColor,
     Color,
     SoftObjectPath,
+    GameplayTagContainer,
     Struct(Option<String>),
 }
 impl From<&str> for StructType {
@@ -494,6 +495,7 @@ impl From<&str> for StructType {
             "LinearColor" => StructType::LinearColor,
             "Color" => StructType::Color,
             "SoftObjectPath" => StructType::SoftObjectPath,
+            "GameplayTagContainer" => StructType::GameplayTagContainer,
             "Struct" => StructType::Struct(None),
             _ => StructType::Struct(Some(t.to_owned())),
         }
@@ -514,6 +516,7 @@ impl From<String> for StructType {
             "LinearColor" => StructType::LinearColor,
             "Color" => StructType::Color,
             "SoftObjectPath" => StructType::SoftObjectPath,
+            "GameplayTagContainer" => StructType::GameplayTagContainer,
             "Struct" => StructType::Struct(None),
             _ => StructType::Struct(Some(t)),
         }
@@ -539,6 +542,7 @@ impl StructType {
                 StructType::LinearColor => "LinearColor",
                 StructType::Color => "Color",
                 StructType::SoftObjectPath => "SoftObjectPath",
+                StructType::GameplayTagContainer => "GameplayTagContainer",
                 StructType::Struct(Some(t)) => t,
                 _ => unreachable!(),
             },
@@ -893,6 +897,41 @@ impl IntPoint {
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
         writer.write_i32::<LE>(self.x)?;
         writer.write_i32::<LE>(self.y)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct GameplayTag {
+    pub name: String,
+}
+impl GameplayTag {
+    fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
+        Ok(Self {
+            name: read_string(reader)?,
+        })
+    }
+    fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
+        write_string(writer, &self.name)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct GameplayTagContainer {
+    pub gameplay_tags: Vec<GameplayTag>,
+}
+impl GameplayTagContainer {
+    fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
+        Ok(Self {
+            gameplay_tags: read_array(reader.read_u32::<LE>()?, reader, GameplayTag::read)?,
+        })
+    }
+    fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
+        writer.write_u32::<LE>(self.gameplay_tags.len() as u32)?;
+        for entry in &self.gameplay_tags {
+            entry.write(writer)?;
+        }
         Ok(())
     }
 }
@@ -1275,6 +1314,7 @@ pub enum StructValue {
     Color(Color),
     Rotator(Rotator),
     SoftObjectPath(String, String),
+    GameplayTagContainer(GameplayTagContainer),
     /// User defined struct which is simply a list of properties
     Struct(Properties),
 }
@@ -1401,6 +1441,10 @@ impl StructValue {
             StructType::SoftObjectPath => {
                 StructValue::SoftObjectPath(read_string(reader)?, read_string(reader)?)
             }
+            StructType::GameplayTagContainer => {
+                StructValue::GameplayTagContainer(GameplayTagContainer::read(reader)?)
+            }
+
             StructType::Struct(_) => StructValue::Struct(read_properties_until_none(reader)?),
         })
     }
@@ -1421,6 +1465,7 @@ impl StructValue {
                 write_string(writer, a)?;
                 write_string(writer, b)?;
             }
+            StructValue::GameplayTagContainer(v) => v.write(writer)?,
             StructValue::Struct(v) => write_properties_none_terminated(writer, v)?,
         }
         Ok(())
