@@ -1,10 +1,10 @@
 [package]
 name = "uesave"
-version = "0.3.0"
-edition = "2021"
+version = "0.3.1"
+edition = "2024"
 authors = ["trumank"]
-repository = "https://github.com/trumank/uesave-rs"
-homepage = "https://github.com/trumank/uesave-rs"
+repository = "https://github.com/iebb/uesave-rs"
+homepage = "https://github.com/iebb/uesave-rs"
 description = "Unreal Engine save file (GVAS) reading/writing"
 keywords = ["unreal-engine", "save", "gvas"]
 license = "MIT"

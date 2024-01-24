@@ -1877,6 +1877,7 @@ pub enum Property {
         id: Option<uuid::Uuid>,
         value: StructValue,
         struct_type: StructType,
+        #[serde(default = "uuid::Uuid::nil", skip_serializing_if = "uuid::Uuid::is_nil")]
         struct_id: uuid::Uuid,
     },
     Array {
