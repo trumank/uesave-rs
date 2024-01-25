@@ -1,5 +1,7 @@
+use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{stdin, stdout, BufRead, BufReader, BufWriter, Cursor, Write};
+use std::process::exit;
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -101,6 +103,48 @@ fn parse_type(t: &str) -> Result<(String, StructType)> {
 }
 
 pub fn main() -> Result<()> {
+    
+    let args: Vec<String> = env::args().collect();
+
+
+        //let file_result = File::open("C:\\Users\\cnc\\Downloads\\uesave-x86_64-pc-windows-msvc\\8B9E670B4FDCBD037E1323A482D41CFC\\Level.sav.gvas");
+        if &args[1] == "raw2json"{
+                let file_result = File::open(&args[2]);
+    if let Ok(mut file) = file_result {
+            let tset = uesave::Context::run(&mut file, uesave::read_property)?.unwrap();;
+            print!("{}", serde_json::to_string_pretty(&&tset.1)?);
+        
+    } else {
+        
+        println!("Failed to open file");
+         exit(1);
+        
+    }
+            exit(0);
+        }else if &args[1] == "json2raw"{
+                let file_result = File::open(&args[2]);
+    if let Ok(mut file) = file_result {
+                let save: uesave::Property = serde_json::from_reader(&mut file)?;
+                let mut file = File::create(&args[3])?;
+                uesave::Context::run(&mut file, |writer| {
+                    uesave::write_property((&"SaveParameter".to_string(), &save), writer)
+                })?;
+   } else {
+        
+        println!("Failed to open file");
+         exit(1);
+        
+    }
+            
+    }
+       
+
+
+
+         
+
+    
+    
     let args = Args::parse();
 
     match args.action {
