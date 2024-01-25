@@ -48,13 +48,13 @@ trait Writable<W> {
     fn write(&self, writer: &mut Context<W>) -> TResult<()>;
 }
 
-struct SeekReader<R: Read> {
+pub struct SeekReader<R: Read> {
     reader: R,
     read_bytes: usize,
 }
 
 impl<R: Read> SeekReader<R> {
-    fn new(reader: R) -> Self {
+    pub fn new(reader: R) -> Self {
         Self {
             reader,
             read_bytes: 0,
@@ -153,7 +153,7 @@ fn write_properties_none_terminated<W: Write>(
     Ok(())
 }
 
-fn read_property<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Option<(String, Property)>> {
+pub fn read_property<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Option<(String, Property)>> {
     let name = read_string(reader)?;
     if name == "None" {
         Ok(None)
@@ -166,7 +166,7 @@ fn read_property<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Option<(Str
         })
     }
 }
-fn write_property<W: Write>(prop: (&String, &Property), writer: &mut Context<W>) -> TResult<()> {
+pub fn write_property<W: Write>(prop: (&String, &Property), writer: &mut Context<W>) -> TResult<()> {
     write_string(writer, prop.0)?;
     prop.1.get_type().write(writer)?;
 
@@ -251,7 +251,7 @@ impl<'p, 'n> Scope<'p, 'n> {
 }
 
 #[derive(Debug)]
-struct Context<'stream, 'header, 'types, 'scope, S> {
+pub struct Context<'stream, 'header, 'types, 'scope, S> {
     stream: &'stream mut S,
     header: Option<&'header Header>,
     types: &'types Types,
@@ -277,7 +277,7 @@ impl<W: Write> Write for Context<'_, '_, '_, '_, W> {
 }
 
 impl<'stream, 'header, 'types, 'scope, S> Context<'stream, 'header, 'types, 'scope, S> {
-    fn run<F, T>(stream: &'stream mut S, f: F) -> T
+    pub fn run<F, T>(stream: &'stream mut S, f: F) -> T
     where
         F: FnOnce(&mut Context<'stream, '_, '_, 'scope, S>) -> T,
     {
@@ -819,7 +819,7 @@ pub struct Vector {
 }
 impl Vector {
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
-        if reader.header.as_ref().unwrap().large_world_coordinates() {
+        if reader.header.is_none() || reader.header.as_ref().unwrap().large_world_coordinates() {
             Ok(Self {
                 x: reader.read_f64::<LE>()?,
                 y: reader.read_f64::<LE>()?,
@@ -834,7 +834,7 @@ impl Vector {
         }
     }
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
-        if writer.header.as_ref().unwrap().large_world_coordinates() {
+        if writer.header.is_none() || writer.header.as_ref().unwrap().large_world_coordinates() {
             writer.write_f64::<LE>(self.x)?;
             writer.write_f64::<LE>(self.y)?;
             writer.write_f64::<LE>(self.z)?;
@@ -2525,7 +2525,7 @@ impl Save {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::*;
     use pretty_assertions::assert_eq;
 
@@ -2799,7 +2799,7 @@ mod tests {
         Ok(())
     }
 
-    fn rw_property(original: &[u8]) -> TResult<()> {
+   pub fn rw_property(original: &[u8]) -> TResult<()> {
         let mut reader = Cursor::new(&original);
         Context::run(&mut reader, |reader| {
             let property = read_property(reader)?.unwrap();
