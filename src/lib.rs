@@ -29,10 +29,9 @@ match save.root.properties["NumberOfGamesPlayed"] {
 
 mod error;
 
-pub use error::Error;
+pub use error::{Error, ParseError};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
-use error::ParseError;
 use std::io::{Read, Seek, Write};
 
 use serde::{Deserialize, Serialize};
