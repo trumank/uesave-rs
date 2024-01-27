@@ -464,6 +464,7 @@ impl PropertyType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag="_type", content="_struct")]
 pub enum StructType {
     Guid,
     DateTime,
@@ -1268,12 +1269,14 @@ impl<W: Write> Writable<W> for Text {
 
 /// Just a plain byte, or an enum in which case the variant will be a String
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum Byte {
     Byte(u8),
     Label(String),
 }
 /// Vectorized [`Byte`]
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum ByteArray {
     Byte(Vec<u8>),
     Label(Vec<String>),
@@ -1321,6 +1324,7 @@ pub enum StructValue {
 
 /// Vectorized properties to avoid storing the variant with each value
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag="_value_type", content="value")]
 pub enum ValueVec {
     Int8(Vec<Int8>),
     Int16(Vec<Int16>),
@@ -1345,6 +1349,7 @@ pub enum ValueVec {
 
 /// Encapsulates [`ValueVec`] with a special handling of structs. See also: [`ValueSet`]
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "_array_type")]
 pub enum ValueArray {
     Base(ValueVec),
     Struct {
@@ -1357,6 +1362,7 @@ pub enum ValueArray {
 }
 /// Encapsulates [`ValueVec`] with a special handling of structs. See also: [`ValueArray`]
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "_set_type")]
 pub enum ValueSet {
     Base(ValueVec),
     Struct(Vec<StructValue>),
@@ -1740,6 +1746,7 @@ impl ValueSet {
 
 /// Properties consist of an ID and a value and are present in [`Root`] and [`StructValue::Struct`]
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "_type")]
 pub enum Property {
     Int8 {
         #[serde(skip_serializing_if = "Option::is_none")]

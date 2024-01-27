@@ -12,6 +12,8 @@ and write Deep Rock Galactic save files (and likely a lot more).
 There is a small binary utility to quickly convert saves to and from a plain
 text JSON format which can be used for manual save editing.
 
+> This has been modified for a more compact serialization, and is incompatible with the original one.
+
 ## Usage
 
 ```console
@@ -23,7 +25,8 @@ Commands:
   to-json    Convert binary save to plain text JSON
   from-json  Convert JSON back to binary save
   edit       Launch $EDITOR to edit a save file as JSON in place
-  help       Print this message or the help of the given subcommand(s)
+  help       Print this message or the help of the gi
+  ven subcommand(s)
 
 Options:
   -h, --help     Print help information
