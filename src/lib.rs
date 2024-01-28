@@ -33,7 +33,7 @@ pub use error::Error;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use error::ParseError;
-use std::io::{Read, Seek, Write};
+use std::io::{BufReader, Cursor, Read, Seek, Write};
 
 use serde::{Deserialize, Serialize};
 
@@ -138,7 +138,38 @@ type Properties = indexmap::IndexMap<String, Property>;
 fn read_properties_until_none<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Properties> {
     let mut properties = Properties::new();
     while let Some((name, prop)) = read_property(reader)? {
-        properties.insert(name, prop);
+        let mut is_parsed = false;
+        if name == "RawData" {
+            match &prop {
+                Property::Array { id, value, .. } => {
+                    match value {
+                        ValueArray::Base(ValueVec::Byte(ByteArray::Byte(v))) => {
+                            // vec! to BufReader
+                            let buf = Cursor::new(v.as_slice());
+                            let mut temp_buf = BufReader::new(buf);
+                            let mut temp_reader = Context::<'_, '_, '_, '_, BufReader<Cursor<&[u8]>>> {
+                                stream: &mut temp_buf,
+                                header: reader.header,
+                                types: reader.types,
+                                scope: reader.scope,
+                            };
+                            if let Ok(inner_props) = read_properties_until_none(&mut temp_reader) {
+                                temp_reader.read_u32::<LE>()?;
+                                let struct_id = uuid::Uuid::read(&mut temp_reader)?;
+                                let replacement = Property::RawData { id: *id, properties: inner_props, struct_id };
+                                properties.insert(name.clone(), replacement);
+                                is_parsed = true;
+                            }
+                        }
+                        _ => todo!(),
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !is_parsed {
+            properties.insert(name, prop);
+        }
     }
     Ok(properties)
 }
@@ -349,16 +380,7 @@ impl<'stream, 'header, 'types, 'scope, R: Read + Seek>
     where
         'types: 't,
     {
-        let offset = self.stream.stream_position()?;
-        Ok(self.get_type().unwrap_or_else(|| {
-            eprintln!(
-                "offset {}: StructType for \"{}\" unspecified, assuming {:?}",
-                offset,
-                self.path(),
-                t
-            );
-            t
-        }))
+        Ok(self.get_type().unwrap_or_else(||t))
     }
 }
 
@@ -1887,6 +1909,12 @@ pub enum Property {
         #[serde(default = "uuid::Uuid::nil", skip_serializing_if = "uuid::Uuid::is_nil")]
         struct_id: uuid::Uuid,
     },
+    RawData {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<uuid::Uuid>,
+        properties: Properties,
+        struct_id: uuid::Uuid,
+    },
     Array {
         array_type: PropertyType,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -1928,6 +1956,7 @@ impl Property {
             Property::Set { .. } => PropertyType::SetProperty,
             Property::Map { .. } => PropertyType::MapProperty,
             Property::Struct { .. } => PropertyType::StructProperty,
+            Property::RawData { .. } => PropertyType::StructProperty,
             Property::Array { .. } => PropertyType::ArrayProperty,
         }
     }
@@ -2318,6 +2347,39 @@ impl Property {
                 for v in value {
                     writer.stream(&mut buf, |writer| v.write(writer))?;
                 }
+                let size = buf.len();
+                writer.write_all(&buf)?;
+                size
+            }
+            Property::RawData {
+                struct_id,
+                id,
+                properties,
+            } => {
+
+                let mut buf = vec![];
+                let mut temp_buf = Cursor::new(&mut buf);
+                let mut temp_writer = Context::<'_, '_, '_, '_, Cursor<&mut Vec<u8>>> {
+                    stream: &mut temp_buf,
+                    header: writer.header,
+                    types: writer.types,
+                    scope: writer.scope,
+                };
+                // new Property::Array of ByteArray::Byte
+                for prop in properties {
+                    write_property(prop, &mut temp_writer)?;
+                }
+                // write "None"
+                write_string(&mut temp_writer, "None")?;
+                temp_writer.write_u32::<LE>(0)?;
+                struct_id.write(&mut temp_writer)?;
+
+                let value = ValueArray::Base(ValueVec::Byte(ByteArray::Byte(buf)));
+                PropertyType::ByteProperty.write(writer)?;
+                write_optional_uuid(writer, *id)?;
+
+                let mut buf = vec![];
+                writer.stream(&mut buf, |writer| value.write(writer))?;
                 let size = buf.len();
                 writer.write_all(&buf)?;
                 size

@@ -1,6 +1,6 @@
 [package]
 name = "uesave"
-version = "0.3.5"
+version = "0.3.7"
 edition = "2021"
 authors = ["trumank"]
 repository = "https://github.com/iebb/uesave-rs"
