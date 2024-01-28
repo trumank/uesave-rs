@@ -33,7 +33,7 @@ pub use error::Error;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use error::ParseError;
-use std::io::{BufReader, Cursor, Read, Seek, Write};
+use std::io::{Cursor, Read, Seek, Write};
 
 use serde::{Deserialize, Serialize};
 
@@ -134,20 +134,20 @@ fn write_string_always_trailing<W: Write>(writer: &mut Context<W>, string: &str)
 }
 
 type Properties = indexmap::IndexMap<String, Property>;
-
 fn read_properties_until_none<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Properties> {
     let mut properties = Properties::new();
     while let Some((name, prop)) = read_property(reader)? {
+
         let mut is_parsed = false;
+        #[cfg(feature = "parse_raw_data")]
         if name == "RawData" {
             match &prop {
                 Property::Array { id, value, .. } => {
                     match value {
                         ValueArray::Base(ValueVec::Byte(ByteArray::Byte(v))) => {
-                            // vec! to BufReader
-                            let buf = Cursor::new(v.as_slice());
-                            let mut temp_buf = BufReader::new(buf);
-                            let mut temp_reader = Context::<'_, '_, '_, '_, BufReader<Cursor<&[u8]>>> {
+                            let buf = std::io::Cursor::new(v.as_slice());
+                            let mut temp_buf = std::io::BufReader::new(buf);
+                            let mut temp_reader = Context::<'_, '_, '_, '_, std::io::BufReader<Cursor<&[u8]>>> {
                                 stream: &mut temp_buf,
                                 header: reader.header,
                                 types: reader.types,
@@ -161,7 +161,7 @@ fn read_properties_until_none<R: Read + Seek>(reader: &mut Context<R>) -> TResul
                                 is_parsed = true;
                             }
                         }
-                        _ => todo!(),
+                        _ => {},
                     }
                 }
                 _ => {}
@@ -380,7 +380,8 @@ impl<'stream, 'header, 'types, 'scope, R: Read + Seek>
     where
         'types: 't,
     {
-        Ok(self.get_type().unwrap_or_else(||t))
+        let offset = self.stream.stream_position()?;
+        Ok(self.get_type().unwrap_or_else(|| t))
     }
 }
 
@@ -1956,7 +1957,7 @@ impl Property {
             Property::Set { .. } => PropertyType::SetProperty,
             Property::Map { .. } => PropertyType::MapProperty,
             Property::Struct { .. } => PropertyType::StructProperty,
-            Property::RawData { .. } => PropertyType::StructProperty,
+            Property::RawData { .. } => PropertyType::ArrayProperty,
             Property::Array { .. } => PropertyType::ArrayProperty,
         }
     }
