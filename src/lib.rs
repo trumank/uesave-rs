@@ -2006,6 +2006,7 @@ pub enum Property {
         id: Option<uuid::Uuid>,
         value: String,
         value2: String,
+        value3: String,
     },
     Name {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -2191,6 +2192,7 @@ impl Property {
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
                 value2: read_string(reader)?,
+                value3: read_string(reader)?,
             }),
             PropertyType::ObjectProperty => Ok(Property::Object {
                 id: read_optional_uuid(reader)?,
@@ -2407,11 +2409,12 @@ impl Property {
                 writer.write_all(&buf)?;
                 size
             }
-            Property::SoftObject { id, value, value2 } => {
+            Property::SoftObject { id, value, value2, value3 } => {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 writer.stream(&mut buf, |writer| write_string(writer, value))?;
                 writer.stream(&mut buf, |writer| write_string(writer, value2))?;
+                writer.stream(&mut buf, |writer| write_string(writer, value3))?;
                 let size = buf.len();
                 writer.write_all(&buf)?;
                 size
