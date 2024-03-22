@@ -469,6 +469,7 @@ pub enum StructType {
     Timespan,
     Vector2D,
     Vector,
+    IntVector,
     Box,
     IntPoint,
     Quat,
@@ -487,6 +488,7 @@ impl From<&str> for StructType {
             "Timespan" => StructType::Timespan,
             "Vector2D" => StructType::Vector2D,
             "Vector" => StructType::Vector,
+            "IntVector" => StructType::IntVector,
             "Box" => StructType::Box,
             "IntPoint" => StructType::IntPoint,
             "Quat" => StructType::Quat,
@@ -508,6 +510,7 @@ impl From<String> for StructType {
             "Timespan" => StructType::Timespan,
             "Vector2D" => StructType::Vector2D,
             "Vector" => StructType::Vector,
+            "IntVector" => StructType::IntVector,
             "Box" => StructType::Box,
             "IntPoint" => StructType::IntPoint,
             "Quat" => StructType::Quat,
@@ -534,6 +537,7 @@ impl StructType {
                 StructType::Timespan => "Timespan",
                 StructType::Vector2D => "Vector2D",
                 StructType::Vector => "Vector",
+                StructType::IntVector => "IntVector",
                 StructType::Box => "Box",
                 StructType::IntPoint => "IntPoint",
                 StructType::Quat => "Quat",
@@ -860,6 +864,27 @@ impl Vector2D {
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
         writer.write_f32::<LE>(self.x)?;
         writer.write_f32::<LE>(self.y)?;
+        Ok(())
+    }
+}
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct IntVector {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+impl IntVector {
+    fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
+        Ok(Self {
+            x: reader.read_i32::<LE>()?,
+            y: reader.read_i32::<LE>()?,
+            z: reader.read_i32::<LE>()?,
+        })
+    }
+    fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
+        writer.write_i32::<LE>(self.x)?;
+        writer.write_i32::<LE>(self.y)?;
+        writer.write_i32::<LE>(self.z)?;
         Ok(())
     }
 }
@@ -1306,6 +1331,7 @@ pub enum StructValue {
     Timespan(Timespan),
     Vector2D(Vector2D),
     Vector(Vector),
+    IntVector(IntVector),
     Box(Box),
     IntPoint(IntPoint),
     Quat(Quat),
@@ -1431,6 +1457,7 @@ impl StructValue {
             StructType::Timespan => StructValue::Timespan(reader.read_i64::<LE>()?),
             StructType::Vector2D => StructValue::Vector2D(Vector2D::read(reader)?),
             StructType::Vector => StructValue::Vector(Vector::read(reader)?),
+            StructType::IntVector => StructValue::IntVector(IntVector::read(reader)?),
             StructType::Box => StructValue::Box(Box::read(reader)?),
             StructType::IntPoint => StructValue::IntPoint(IntPoint::read(reader)?),
             StructType::Quat => StructValue::Quat(Quat::read(reader)?),
@@ -1454,6 +1481,7 @@ impl StructValue {
             StructValue::Timespan(v) => writer.write_i64::<LE>(*v)?,
             StructValue::Vector2D(v) => v.write(writer)?,
             StructValue::Vector(v) => v.write(writer)?,
+            StructValue::IntVector(v) => v.write(writer)?,
             StructValue::Box(v) => v.write(writer)?,
             StructValue::IntPoint(v) => v.write(writer)?,
             StructValue::Quat(v) => v.write(writer)?,
