@@ -363,12 +363,12 @@ impl<'stream, 'header, 'types, 'scope, R: Read + Seek>
     {
         let offset = self.stream.stream_position()?;
         Ok(self.get_type().unwrap_or_else(|| {
-            eprintln!(
-                "offset {}: StructType for \"{}\" unspecified, assuming {:?}",
-                offset,
-                self.path(),
-                t
-            );
+            //eprintln!(
+            //    "offset {}: StructType for \"{}\" unspecified, assuming {:?}",
+            //    offset,
+            //    self.path(),
+            //    t
+            //);
             t
         }))
     }
@@ -395,6 +395,7 @@ pub enum PropertyType {
     FieldPathProperty,
     SoftObjectProperty,
     NameProperty,
+    AssetObjectProperty,
     TextProperty,
     DelegateProperty,
     MulticastDelegateProperty,
@@ -426,6 +427,7 @@ impl PropertyType {
             PropertyType::FieldPathProperty => "FieldPathProperty",
             PropertyType::SoftObjectProperty => "SoftObjectProperty",
             PropertyType::NameProperty => "NameProperty",
+            PropertyType::AssetObjectProperty => "AssetObjectProperty",
             PropertyType::TextProperty => "TextProperty",
             PropertyType::DelegateProperty => "DelegateProperty",
             PropertyType::MulticastDelegateProperty => "MulticastDelegateProperty",
@@ -459,6 +461,7 @@ impl PropertyType {
             "FieldPathProperty" => Ok(PropertyType::FieldPathProperty),
             "SoftObjectProperty" => Ok(PropertyType::SoftObjectProperty),
             "NameProperty" => Ok(PropertyType::NameProperty),
+            "AssetObjectProperty" => Ok(PropertyType::AssetObjectProperty),
             "TextProperty" => Ok(PropertyType::TextProperty),
             "DelegateProperty" => Ok(PropertyType::DelegateProperty),
             "MulticastDelegateProperty" => Ok(PropertyType::MulticastDelegateProperty),
@@ -1108,6 +1111,21 @@ impl<W: Write> Writable<W> for FFormatArgumentValue {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct FFormatNamedArguments {
+    arguments: Vec<(String, FFormatArgumentValue)>,
+}
+impl<R: Read + Seek> Readable<R> for FFormatNamedArguments {
+    #[instrument(name = "FFormatNamedArguments_read", skip_all)]
+    fn read(reader: &mut Context<R>) -> TResult<Self> {
+        Ok(Self {
+            arguments: read_array(reader.read_u32::<LE>()?, reader, |r| {
+                Ok((read_string(r)?, FFormatArgumentValue::read(r)?))
+            })?,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct FNumberFormattingOptions {
     always_sign: bool,
     use_grouping: bool,
@@ -1181,8 +1199,21 @@ pub enum TextVariant {
         time_zone: String,
         culture_name: String,
     },
+    // 0xa
+    StateOfDecayUnknown0xA {
+        culture_name: String,
+        a: std::boxed::Box<Text>,
+        b: std::boxed::Box<Text>,
+    },
+    // 0xb
+    StateOfDecayUnknown0xB {
+        lead: u8,
+        text: std::boxed::Box<Text>,
+        arguments: FFormatNamedArguments,
+        trail: Vec<u8>,
+    },
+    // 0xb
     StringTableEntry {
-        // 0xb
         table: String,
         key: String,
     },
@@ -1195,9 +1226,10 @@ impl<R: Read + Seek> Readable<R> for Text {
         let text_history_type = reader.read_i8()?;
         let variant = match text_history_type {
             -0x1 => Ok(TextVariant::None {
-                culture_invariant: (reader.read_u32::<LE>()? != 0) // bHasCultureInvariantString
-                    .then(|| read_string(reader))
-                    .transpose()?,
+                culture_invariant: None,
+                //culture_invariant: (reader.read_u32::<LE>()? != 0) // bHasCultureInvariantString
+                //    .then(|| read_string(reader))
+                //    .transpose()?,
             }),
             0x0 => Ok(TextVariant::Base {
                 namespace: read_string(reader)?,
@@ -1222,10 +1254,25 @@ impl<R: Read + Seek> Readable<R> for Text {
                 time_zone: read_string(reader)?,
                 culture_name: read_string(reader)?,
             }),
+            0xa => Ok({
+                //read_string(reader)?;
+                //transform_type: reader.read_i8()?,
+                //std::boxed::Box::new(Text::read(reader)?);
+
+                //read_array(266, reader, |r| Ok(r.read_u8()?))?;
+
+                TextVariant::StateOfDecayUnknown0xA {
+                    culture_name: read_string(reader)?,
+                    a: std::boxed::Box::new(Text::read(reader)?),
+                    b: std::boxed::Box::new(Text::read(reader)?),
+                }
+            }),
             0xb => Ok({
-                TextVariant::StringTableEntry {
-                    table: read_string(reader)?,
-                    key: read_string(reader)?,
+                TextVariant::StateOfDecayUnknown0xB {
+                    lead: reader.read_u8()?,
+                    text: std::boxed::Box::new(Text::read(reader)?),
+                    arguments: FFormatNamedArguments::read(reader)?,
+                    trail: read_array(9, reader, |r| Ok(r.read_u8()?))?,
                 }
             }),
             _ => Err(Error::Other(format!(
@@ -1298,6 +1345,7 @@ impl<W: Write> Writable<W> for Text {
                 write_string(writer, table)?;
                 write_string(writer, key)?;
             }
+            _ => todo!("write text variant"),
         }
         Ok(())
     }
@@ -1330,6 +1378,7 @@ pub enum PropertyValue {
     Byte(Byte),
     Enum(Enum),
     Name(String),
+    AssetObject(String),
     Str(String),
     SoftObject(String, String),
     SoftObjectPath(String, String),
@@ -1376,6 +1425,7 @@ pub enum ValueVec {
     Text(Vec<Text>),
     SoftObject(Vec<(String, String)>),
     Name(Vec<String>),
+    AssetObject(Vec<String>),
     Object(Vec<String>),
     Box(Vec<Box>),
 }
@@ -1417,6 +1467,7 @@ impl PropertyValue {
             PropertyType::DoubleProperty => PropertyValue::Double(reader.read_f64::<LE>()?),
             PropertyType::BoolProperty => PropertyValue::Bool(reader.read_u8()? > 0),
             PropertyType::NameProperty => PropertyValue::Name(read_string(reader)?),
+            PropertyType::AssetObjectProperty => PropertyValue::AssetObject(read_string(reader)?),
             PropertyType::StrProperty => PropertyValue::Str(read_string(reader)?),
             PropertyType::SoftObjectProperty => {
                 PropertyValue::SoftObject(read_string(reader)?, read_string(reader)?)
@@ -1442,6 +1493,7 @@ impl PropertyValue {
             PropertyValue::Double(v) => writer.write_f64::<LE>(*v)?,
             PropertyValue::Bool(v) => writer.write_u8(u8::from(*v))?,
             PropertyValue::Name(v) => write_string(writer, v)?,
+            PropertyValue::AssetObject(v) => write_string(writer, v)?,
             PropertyValue::Str(v) => write_string(writer, v)?,
             PropertyValue::SoftObject(a, b) => {
                 write_string(writer, a)?;
@@ -1565,6 +1617,9 @@ impl ValueVec {
                 })?)
             }
             PropertyType::NameProperty => ValueVec::Name(read_array(count, reader, read_string)?),
+            PropertyType::AssetObjectProperty => {
+                ValueVec::AssetObject(read_array(count, reader, read_string)?)
+            }
             PropertyType::ObjectProperty => {
                 ValueVec::Object(read_array(count, reader, read_string)?)
             }
@@ -1659,7 +1714,10 @@ impl ValueVec {
                     write_string(writer, i)?;
                 }
             }
-            ValueVec::Str(v) | ValueVec::Object(v) | ValueVec::Name(v) => {
+            ValueVec::Str(v)
+            | ValueVec::Object(v)
+            | ValueVec::Name(v)
+            | ValueVec::AssetObject(v) => {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
                     write_string(writer, i)?;
@@ -1871,6 +1929,11 @@ pub enum Property {
         id: Option<uuid::Uuid>,
         value: String,
     },
+    AssetObject {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<uuid::Uuid>,
+        value: String,
+    },
     Object {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
@@ -1946,6 +2009,7 @@ impl Property {
             Property::Byte { .. } => PropertyType::ByteProperty,
             Property::Enum { .. } => PropertyType::EnumProperty,
             Property::Name { .. } => PropertyType::NameProperty,
+            Property::AssetObject { .. } => PropertyType::AssetObjectProperty,
             Property::Str { .. } => PropertyType::StrProperty,
             Property::FieldPath { .. } => PropertyType::FieldPathProperty,
             Property::SoftObject { .. } => PropertyType::SoftObjectProperty,
@@ -2039,6 +2103,10 @@ impl Property {
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
             }),
+            PropertyType::AssetObjectProperty => Ok(Property::AssetObject {
+                id: read_optional_uuid(reader)?,
+                value: read_string(reader)?,
+            }),
             PropertyType::StrProperty => Ok(Property::Str {
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
@@ -2081,7 +2149,15 @@ impl Property {
                 })
             }
             PropertyType::SetProperty => {
-                let set_type = PropertyType::read(reader)?;
+                let path = reader.path();
+                let set_type = match path.as_str() {
+                    ".MapSaveCollection.MapSaves.SiteCollection.MapSiteSaves.SiteSpecificVORecords" => PropertyType::StructProperty,
+                    ".CommunitySave.CommunityMetCharacterIds" => PropertyType::IntProperty,
+                    ".RadioSave.SeenCommands" => PropertyType::StrProperty,
+                    ".StorySave.ArcManagerSave.CompletedArcs" => PropertyType::StrProperty,
+                    _ => todo!("set type"),
+                };
+
                 let id = read_optional_uuid(reader)?;
                 reader.read_u32::<LE>()?;
                 let struct_type = match set_type {
@@ -2096,8 +2172,17 @@ impl Property {
                 })
             }
             PropertyType::MapProperty => {
-                let key_type = PropertyType::read(reader)?;
-                let value_type = PropertyType::read(reader)?;
+                let path = reader.path();
+                let (key_type, value_type) = match path.as_str() {
+                    ".MapSaveCollection.MapSaves.EnclaveCollection.EnclaveRelationships" => (PropertyType::IntProperty, PropertyType::StructProperty),
+                    ".MapSaveCollection.MapSaves.EnclaveCollection.EnclaveRelationships.Entries" => (PropertyType::IntProperty, PropertyType::EnumProperty),
+                    ".MapSaveCollection.MapSaves.AmbientSpawnerSave.SavedKills" => (PropertyType::IntProperty, PropertyType::StructProperty),
+                    ".CommunitySave.BaseSave.FacilitySlotSaves.FacilitySlotSaves.InProgressAction.ActionEscrow.Items" => (PropertyType::StructProperty, PropertyType::StructProperty),
+                    ".CommunitySave.BaseSave.EscrowSaves.BuildEscrowSaves" => (PropertyType::StrProperty, PropertyType::StructProperty),
+                    ".CommunitySave.BaseSave.EscrowSaves.BuildEscrowSaves.Items" => (PropertyType::StrProperty, PropertyType::IntProperty),
+                    _ => todo!("map type"),
+                };
+
                 let id = read_optional_uuid(reader)?;
                 reader.read_u32::<LE>()?;
                 let count = reader.read_u32::<LE>()?;
@@ -2244,6 +2329,14 @@ impl Property {
                 value.len() + 5
             }
             Property::Name { id, value } => {
+                write_optional_uuid(writer, *id)?;
+                let mut buf = vec![];
+                writer.stream(&mut buf, |writer| write_string(writer, value))?;
+                let size = buf.len();
+                writer.write_all(&buf)?;
+                size
+            }
+            Property::AssetObject { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 writer.stream(&mut buf, |writer| write_string(writer, value))?;
@@ -2450,7 +2543,8 @@ impl<R: Read + Seek> Readable<R> for Header {
         let package_version = if save_game_version < 3 {
             PackageVersion::Old(reader.read_u32::<LE>()?)
         } else {
-            PackageVersion::New(reader.read_u32::<LE>()?, reader.read_u32::<LE>()?)
+            reader.read_u32::<LE>()?;
+            PackageVersion::New(0, 0)
         };
         Ok(Header {
             magic,
@@ -2503,9 +2597,29 @@ pub struct Root {
 impl Root {
     #[instrument(name = "Root_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
+        let magic1 = reader.read_u32::<LE>()?;
+        let save_game_type = read_string(reader)?;
+        let magic2 = reader.read_u32::<LE>()?;
+
+        let compressed = reader.read_u32::<LE>()? as usize;
+        let uncompressed = reader.read_u32::<LE>()?;
+
+        let mut buf = vec![0; compressed];
+        reader.read_exact(&mut buf)?;
+
+        let uncompressed = lz4_flex::decompress(&buf, uncompressed as usize).unwrap();
+
+        std::fs::write("sod2_lz4.decomp", &uncompressed).unwrap();
+
+        let mut reader_inner = std::io::Cursor::new(uncompressed);
+
         Ok(Self {
-            save_game_type: read_string(reader)?,
-            properties: read_properties_until_none(reader)?,
+            save_game_type,
+            properties: ser_hex::CounterSubscriber::read(
+                "trace_inner.json",
+                &mut reader_inner,
+                |reader_inner| reader.stream(reader_inner, |c| read_properties_until_none(c)),
+            )?,
         })
     }
     #[instrument(name = "Root_write", skip_all)]
