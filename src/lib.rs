@@ -890,19 +890,22 @@ impl IntVector {
 }
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Box {
-    pub a: Vector,
-    pub b: Vector,
+    pub min: Vector,
+    pub max: Vector,
+    pub is_valid: bool,
 }
 impl Box {
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
-        let a = Vector::read(reader)?;
-        let b = Vector::read(reader)?;
-        reader.read_u8()?;
-        Ok(Self { a, b })
+        Ok(Self {
+            min: Vector::read(reader)?,
+            max: Vector::read(reader)?,
+            is_valid: reader.read_u8()? > 0,
+        })
     }
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
-        self.a.write(writer)?;
-        self.b.write(writer)?;
+        self.min.write(writer)?;
+        self.max.write(writer)?;
+        writer.write_u8(self.is_valid as u8)?;
         Ok(())
     }
 }
