@@ -851,19 +851,31 @@ impl Vector {
 }
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Vector2D {
-    pub x: f32,
-    pub y: f32,
+    pub x: f64,
+    pub y: f64,
 }
 impl Vector2D {
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
-        Ok(Self {
-            x: reader.read_f32::<LE>()?,
-            y: reader.read_f32::<LE>()?,
-        })
+        if reader.header.as_ref().unwrap().large_world_coordinates() {
+            Ok(Self {
+                x: reader.read_f64::<LE>()?,
+                y: reader.read_f64::<LE>()?,
+            })
+        } else {
+            Ok(Self {
+                x: reader.read_f32::<LE>()? as f64,
+                y: reader.read_f32::<LE>()? as f64,
+            })
+        }
     }
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
-        writer.write_f32::<LE>(self.x)?;
-        writer.write_f32::<LE>(self.y)?;
+        if writer.header.as_ref().unwrap().large_world_coordinates() {
+            writer.write_f64::<LE>(self.x)?;
+            writer.write_f64::<LE>(self.y)?;
+        } else {
+            writer.write_f32::<LE>(self.x as f32)?;
+            writer.write_f32::<LE>(self.y as f32)?;
+        }
         Ok(())
     }
 }
