@@ -123,7 +123,17 @@ pub fn main() -> Result<()> {
                 types.add(path, t);
             }
 
-            let mut input = std::io::Cursor::new(fs::read(action.path)?);
+            let path = std::path::Path::new(&action.path);
+
+            if let Ok(types_file) = fs::read_to_string(path.with_extension("types")) {
+                for t in types_file.lines() {
+                    if let Ok((path, t)) = parse_type(t) {
+                        types.add(path, t);
+                    }
+                }
+            }
+
+            let mut input = std::io::Cursor::new(fs::read(path)?);
             let mut output = std::io::Cursor::new(vec![]);
             Save::read_with_types(&mut input, &types)?.write(&mut output)?;
             let (input, output) = (input.into_inner(), output.into_inner());
