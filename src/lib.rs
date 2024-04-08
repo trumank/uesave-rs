@@ -34,7 +34,7 @@ pub use error::{Error, ParseError};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io::{Read, Seek, Write};
 
-use serde::{Deserialize, Serialize};
+use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 
 type TResult<T> = Result<T, Error>;
 
@@ -184,10 +184,90 @@ fn write_string_trailing<W: Write>(
     Ok(())
 }
 
-type Properties = indexmap::IndexMap<String, Property>;
+#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PropertyKey(pub u32, pub String);
+impl From<String> for PropertyKey {
+    fn from(value: String) -> Self {
+        Self(0, value)
+    }
+}
+impl From<&str> for PropertyKey {
+    fn from(value: &str) -> Self {
+        Self(0, value.to_string())
+    }
+}
+
+struct PropertyKeyVisitor;
+impl<'de> Visitor<'de> for PropertyKeyVisitor {
+    type Value = PropertyKey;
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str(
+            "a property key in the form of key name and index seperated by '_' e.g. property_2",
+        )
+    }
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        let (name_str, index_str) = value
+            .rsplit_once('_')
+            .ok_or_else(|| serde::de::Error::custom("property key does not contain a '_'"))?;
+        let index: u32 = index_str.parse().map_err(serde::de::Error::custom)?;
+
+        Ok(PropertyKey(index, name_str.to_string()))
+    }
+}
+impl<'de> Deserialize<'de> for PropertyKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(PropertyKeyVisitor)
+    }
+}
+impl Serialize for PropertyKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("{}_{}", self.1, self.0))
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Properties(pub indexmap::IndexMap<PropertyKey, Property>);
+impl Properties {
+    fn insert(&mut self, k: impl Into<PropertyKey>, v: Property) -> Option<Property> {
+        self.0.insert(k.into(), v)
+    }
+}
+impl<K> std::ops::Index<K> for Properties
+where
+    K: Into<PropertyKey>,
+{
+    type Output = Property;
+    fn index(&self, index: K) -> &Self::Output {
+        self.0.index(&index.into())
+    }
+}
+impl<K> std::ops::IndexMut<K> for Properties
+where
+    K: Into<PropertyKey>,
+{
+    fn index_mut(&mut self, index: K) -> &mut Property {
+        self.0.index_mut(&index.into())
+    }
+}
+impl<'a> IntoIterator for &'a Properties {
+    type Item = <&'a indexmap::IndexMap<PropertyKey, Property> as IntoIterator>::Item;
+    type IntoIter = <&'a indexmap::IndexMap<PropertyKey, Property> as IntoIterator>::IntoIter;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
 
 fn read_properties_until_none<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Properties> {
-    let mut properties = Properties::new();
+    let mut properties = Properties::default();
     while let Some((name, prop)) = read_property(reader)? {
         properties.insert(name, prop);
     }
@@ -204,27 +284,34 @@ fn write_properties_none_terminated<W: Write>(
     Ok(())
 }
 
-fn read_property<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Option<(String, Property)>> {
+fn read_property<R: Read + Seek>(
+    reader: &mut Context<R>,
+) -> TResult<Option<(PropertyKey, Property)>> {
     let name = read_string(reader)?;
     if name == "None" {
         Ok(None)
     } else {
         reader.scope(&name, |reader| {
             let t = PropertyType::read(reader)?;
-            let size = reader.read_u64::<LE>()?;
+            let size = reader.read_u32::<LE>()?;
+            let index = reader.read_u32::<LE>()?;
             let value = Property::read(reader, t, size)?;
-            Ok(Some((name.clone(), value)))
+            Ok(Some((PropertyKey(index, name.clone()), value)))
         })
     }
 }
-fn write_property<W: Write>(prop: (&String, &Property), writer: &mut Context<W>) -> TResult<()> {
-    write_string(writer, prop.0)?;
+fn write_property<W: Write>(
+    prop: (&PropertyKey, &Property),
+    writer: &mut Context<W>,
+) -> TResult<()> {
+    write_string(writer, &prop.0 .1)?;
     prop.1.get_type().write(writer)?;
 
     let mut buf = vec![];
     let size = writer.stream(&mut buf, |writer| prop.1.write(writer))?;
 
-    writer.write_u64::<LE>(size as u64)?;
+    writer.write_u32::<LE>(size as u32)?;
+    writer.write_u32::<LE>(prop.0 .0)?;
     writer.write_all(&buf[..])?;
     Ok(())
 }
@@ -1571,7 +1658,7 @@ impl ValueVec {
     fn read<R: Read + Seek>(
         reader: &mut Context<R>,
         t: &PropertyType,
-        size: u64,
+        size: u32,
         count: u32,
     ) -> TResult<ValueVec> {
         Ok(match t {
@@ -1600,7 +1687,7 @@ impl ValueVec {
                 ValueVec::Bool(read_array(count, reader, |r| Ok(r.read_u8()? > 0))?)
             }
             PropertyType::ByteProperty => {
-                if size == count.into() {
+                if size == count {
                     ValueVec::Byte(ByteArray::Byte(read_array(count, reader, |r| {
                         Ok(r.read_u8()?)
                     })?))
@@ -1748,7 +1835,7 @@ impl ValueArray {
     fn read<R: Read + Seek>(
         reader: &mut Context<R>,
         t: &PropertyType,
-        size: u64,
+        size: u32,
     ) -> TResult<ValueArray> {
         let count = reader.read_u32::<LE>()?;
         Ok(match t {
@@ -1808,7 +1895,7 @@ impl ValueSet {
         reader: &mut Context<R>,
         t: &PropertyType,
         st: Option<&StructType>,
-        size: u64,
+        size: u32,
     ) -> TResult<ValueSet> {
         let count = reader.read_u32::<LE>()?;
         Ok(match t {
@@ -2022,7 +2109,7 @@ impl Property {
     fn read<R: Read + Seek>(
         reader: &mut Context<R>,
         t: PropertyType,
-        size: u64,
+        size: u32,
     ) -> TResult<Property> {
         match t {
             PropertyType::Int8Property => Ok(Property::Int8 {
@@ -2804,10 +2891,7 @@ mod tests {
         let mut reader = Cursor::new(bytes);
         assert_eq!(
             Context::run(&mut reader, read_property)?,
-            Some((
-                "VersionNumber".to_string(),
-                Property::Int { id: None, value: 2 }
-            ))
+            Some(("VersionNumber".into(), Property::Int { id: None, value: 2 }))
         );
         Ok(())
     }
@@ -2837,32 +2921,32 @@ mod tests {
         assert_eq!(
             Context::run(&mut reader, read_property)?,
             Some((
-                "VanityMasterySave".to_string(),
+                "VanityMasterySave".into(),
                 Property::Struct {
                     id: None,
-                    value: StructValue::Struct(indexmap::IndexMap::from([
+                    value: StructValue::Struct(Properties(indexmap::IndexMap::from([
                         (
-                            "Level".to_string(),
+                            "Level".into(),
                             Property::Int {
                                 id: None,
                                 value: 140,
                             }
                         ),
                         (
-                            "XP".to_string(),
+                            "XP".into(),
                             Property::Int {
                                 id: None,
                                 value: 9018,
                             },
                         ),
                         (
-                            "HasAwardedForOldPurchases".to_string(),
+                            "HasAwardedForOldPurchases".into(),
                             Property::Bool {
                                 id: None,
                                 value: true,
                             },
                         ),
-                    ])),
+                    ]))),
                     struct_type: StructType::Struct(Some("VanityMasterySave".to_string())),
                     struct_id: uuid::uuid!("00000000000000000000000000000000"),
                 }
@@ -2884,7 +2968,7 @@ mod tests {
         assert_eq!(
             Context::run(&mut reader, read_property)?,
             Some((
-                "StatIndices".to_string(),
+                "StatIndices".into(),
                 Property::Array {
                     array_type: PropertyType::IntProperty,
                     id: None,
