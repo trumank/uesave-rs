@@ -111,23 +111,75 @@ fn write_string<W: Write>(writer: &mut Context<W>, string: &str) -> TResult<()> 
     if string.is_empty() {
         writer.write_u32::<LE>(0)?;
     } else {
-        write_string_always_trailing(writer, string)?;
+        write_string_trailing(writer, string, None)?;
     }
     Ok(())
 }
 
-fn write_string_always_trailing<W: Write>(writer: &mut Context<W>, string: &str) -> TResult<()> {
+fn read_string_trailing<R: Read + Seek>(reader: &mut Context<R>) -> TResult<(String, Vec<u8>)> {
+    let len = reader.read_i32::<LE>()?;
+    if len < 0 {
+        let bytes = (-len) as usize * 2;
+        let mut chars = vec![];
+        let mut rest = vec![];
+        let mut read = 0;
+        while read < bytes {
+            let next = reader.read_u16::<LE>()?;
+            read += 2;
+            if next == 0 {
+                rest.extend(next.to_le_bytes());
+                break;
+            } else {
+                chars.push(next);
+            }
+        }
+        while read < bytes {
+            rest.push(reader.read_u8()?);
+            read += 1;
+        }
+        Ok((String::from_utf16(&chars).unwrap(), rest))
+    } else {
+        let bytes = len as usize;
+        let mut chars = vec![];
+        let mut rest = vec![];
+        let mut read = 0;
+        while read < bytes {
+            let next = reader.read_u8()?;
+            read += 1;
+            if next == 0 {
+                rest.push(next);
+                break;
+            } else {
+                chars.push(next);
+            }
+        }
+        while read < bytes {
+            rest.push(reader.read_u8()?);
+            read += 1;
+        }
+        Ok((String::from_utf8(chars).unwrap(), rest))
+    }
+}
+fn write_string_trailing<W: Write>(
+    writer: &mut Context<W>,
+    string: &str,
+    trailing: Option<&[u8]>,
+) -> TResult<()> {
     if string.is_empty() || string.is_ascii() {
-        writer.write_u32::<LE>(string.as_bytes().len() as u32 + 1)?;
+        writer.write_u32::<LE>(
+            (string.as_bytes().len() + trailing.map(|t| t.len()).unwrap_or(1)) as u32,
+        )?;
         writer.write_all(string.as_bytes())?;
-        writer.write_u8(0)?;
+        writer.write_all(trailing.unwrap_or(&[0]))?;
     } else {
         let chars: Vec<u16> = string.encode_utf16().collect();
-        writer.write_i32::<LE>(-(chars.len() as i32 + 1))?;
+        writer.write_i32::<LE>(
+            -((chars.len() + trailing.map(|t| t.len()).unwrap_or(2) / 2) as i32),
+        )?;
         for c in chars {
             writer.write_u16::<LE>(c)?;
         }
-        writer.write_u16::<LE>(0)?;
+        writer.write_all(trailing.unwrap_or(&[0, 0]))?;
     }
     Ok(())
 }
@@ -1161,7 +1213,7 @@ pub enum TextVariant {
     },
     // 0x0
     Base {
-        namespace: String,
+        namespace: (String, Vec<u8>),
         key: String,
         source_string: String,
     },
@@ -1202,7 +1254,7 @@ impl<R: Read + Seek> Readable<R> for Text {
                     .transpose()?,
             }),
             0x0 => Ok(TextVariant::Base {
-                namespace: read_string(reader)?,
+                namespace: read_string_trailing(reader)?,
                 key: read_string(reader)?,
                 source_string: read_string(reader)?,
             }),
@@ -1254,8 +1306,10 @@ impl<W: Write> Writable<W> for Text {
                 source_string,
             } => {
                 writer.write_i8(0x0)?;
-                // TODO sometimes trailing sometimes not?
-                write_string_always_trailing(writer, namespace)?;
+                // This particular string sometimes includes the trailing null byte and sometimes
+                // does not. To preserve byte-for-byte equality we save the trailing bytes (null or
+                // not) to the JSON so they can be retored later.
+                write_string_trailing(writer, &namespace.0, Some(&namespace.1))?;
                 write_string(writer, key)?;
                 write_string(writer, source_string)?;
             }
