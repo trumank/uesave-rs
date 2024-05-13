@@ -1475,7 +1475,7 @@ pub enum PropertyValue {
     Name(String),
     Str(String),
     SoftObject(String, String),
-    SoftObjectPath(String, String),
+    SoftObjectPath(String, String, String),
     Object(String),
     Struct(StructValue),
 }
@@ -1494,7 +1494,7 @@ pub enum StructValue {
     LinearColor(LinearColor),
     Color(Color),
     Rotator(Rotator),
-    SoftObjectPath(String, String),
+    SoftObjectPath(String, String, String),
     GameplayTagContainer(GameplayTagContainer),
     /// User defined struct which is simply a list of properties
     Struct(Properties),
@@ -1590,9 +1590,10 @@ impl PropertyValue {
                 write_string(writer, a)?;
                 write_string(writer, b)?;
             }
-            PropertyValue::SoftObjectPath(a, b) => {
+            PropertyValue::SoftObjectPath(a, b, c) => {
                 write_string(writer, a)?;
                 write_string(writer, b)?;
+                write_string(writer, c)?;
             }
             PropertyValue::Object(v) => write_string(writer, v)?,
             PropertyValue::Byte(v) => match v {
@@ -1620,9 +1621,11 @@ impl StructValue {
             StructType::LinearColor => StructValue::LinearColor(LinearColor::read(reader)?),
             StructType::Color => StructValue::Color(Color::read(reader)?),
             StructType::Rotator => StructValue::Rotator(Rotator::read(reader)?),
-            StructType::SoftObjectPath => {
-                StructValue::SoftObjectPath(read_string(reader)?, read_string(reader)?)
-            }
+            StructType::SoftObjectPath => StructValue::SoftObjectPath(
+                read_string(reader)?,
+                read_string(reader)?,
+                read_string(reader)?,
+            ),
             StructType::GameplayTagContainer => {
                 StructValue::GameplayTagContainer(GameplayTagContainer::read(reader)?)
             }
@@ -1644,9 +1647,10 @@ impl StructValue {
             StructValue::LinearColor(v) => v.write(writer)?,
             StructValue::Color(v) => v.write(writer)?,
             StructValue::Rotator(v) => v.write(writer)?,
-            StructValue::SoftObjectPath(a, b) => {
+            StructValue::SoftObjectPath(a, b, c) => {
                 write_string(writer, a)?;
                 write_string(writer, b)?;
+                write_string(writer, c)?;
             }
             StructValue::GameplayTagContainer(v) => v.write(writer)?,
             StructValue::Struct(v) => write_properties_none_terminated(writer, v)?,
@@ -2006,6 +2010,7 @@ pub enum Property {
         id: Option<uuid::Uuid>,
         value: String,
         value2: String,
+        value3: String,
     },
     Name {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -2191,6 +2196,7 @@ impl Property {
                 id: read_optional_uuid(reader)?,
                 value: read_string(reader)?,
                 value2: read_string(reader)?,
+                value3: read_string(reader)?,
             }),
             PropertyType::ObjectProperty => Ok(Property::Object {
                 id: read_optional_uuid(reader)?,
@@ -2407,11 +2413,17 @@ impl Property {
                 writer.write_all(&buf)?;
                 size
             }
-            Property::SoftObject { id, value, value2 } => {
+            Property::SoftObject {
+                id,
+                value,
+                value2,
+                value3,
+            } => {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
                 writer.stream(&mut buf, |writer| write_string(writer, value))?;
                 writer.stream(&mut buf, |writer| write_string(writer, value2))?;
+                writer.stream(&mut buf, |writer| write_string(writer, value3))?;
                 let size = buf.len();
                 writer.write_all(&buf)?;
                 size
