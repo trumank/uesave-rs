@@ -2551,9 +2551,9 @@ impl<W: Write> Writable<W> for CustomFormatData {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PackageVersion {
-    Old(u32),
-    New(u32, u32),
+pub struct PackageVersion {
+    ue4: u32,
+    ue5: Option<u32>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2585,10 +2585,11 @@ impl<R: Read + Seek> Readable<R> for Header {
             );
         }
         let save_game_version = reader.read_u32::<LE>()?;
-        let package_version = if save_game_version < 3 {
-            PackageVersion::Old(reader.read_u32::<LE>()?)
-        } else {
-            PackageVersion::New(reader.read_u32::<LE>()?, reader.read_u32::<LE>()?)
+        let package_version = PackageVersion {
+            ue4: reader.read_u32::<LE>()?,
+            ue5: (save_game_version >= 3)
+                .then(|| reader.read_u32::<LE>())
+                .transpose()?,
         };
         Ok(Header {
             magic,
@@ -2608,14 +2609,9 @@ impl<W: Write> Writable<W> for Header {
     fn write(&self, writer: &mut Context<W>) -> TResult<()> {
         writer.write_u32::<LE>(self.magic)?;
         writer.write_u32::<LE>(self.save_game_version)?;
-        match self.package_version {
-            PackageVersion::Old(a) => {
-                writer.write_u32::<LE>(a)?;
-            }
-            PackageVersion::New(a, b) => {
-                writer.write_u32::<LE>(a)?;
-                writer.write_u32::<LE>(b)?;
-            }
+        writer.write_u32::<LE>(self.package_version.ue4)?;
+        if let Some(ue5) = self.package_version.ue5 {
+            writer.write_u32::<LE>(ue5)?;
         }
         writer.write_u16::<LE>(self.engine_version_major)?;
         writer.write_u16::<LE>(self.engine_version_minor)?;
