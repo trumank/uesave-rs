@@ -1080,6 +1080,63 @@ impl IntPoint {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum SoftObjectPath {
+    Old {
+        asset_path_name: String,
+        sub_path_string: String,
+    },
+    New {
+        asset_path_name: String,
+        package_name: String,
+        asset_name: String,
+    },
+}
+impl SoftObjectPath {
+    fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
+        let is_new = reader
+            .header
+            .and_then(|h| h.package_version.ue5)
+            .map(
+                |ue5| ue5 >= 1007, /* FSOFTOBJECTPATH_REMOVE_ASSET_PATH_FNAMES */
+            )
+            .unwrap_or_default();
+        Ok(if is_new {
+            Self::New {
+                asset_path_name: read_string(reader)?,
+                package_name: read_string(reader)?,
+                asset_name: read_string(reader)?,
+            }
+        } else {
+            Self::Old {
+                asset_path_name: read_string(reader)?,
+                sub_path_string: read_string(reader)?,
+            }
+        })
+    }
+    fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
+        match self {
+            Self::Old {
+                asset_path_name,
+                sub_path_string,
+            } => {
+                write_string(writer, asset_path_name)?;
+                write_string(writer, sub_path_string)?;
+            }
+            Self::New {
+                asset_path_name,
+                package_name,
+                asset_name,
+            } => {
+                write_string(writer, asset_path_name)?;
+                write_string(writer, package_name)?;
+                write_string(writer, asset_name)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct GameplayTag {
     pub name: String,
 }
@@ -1475,7 +1532,7 @@ pub enum PropertyValue {
     Name(String),
     Str(String),
     SoftObject(String, String),
-    SoftObjectPath(String, String),
+    SoftObjectPath(SoftObjectPath),
     Object(String),
     Struct(StructValue),
 }
@@ -1494,7 +1551,7 @@ pub enum StructValue {
     LinearColor(LinearColor),
     Color(Color),
     Rotator(Rotator),
-    SoftObjectPath(String, String),
+    SoftObjectPath(SoftObjectPath),
     GameplayTagContainer(GameplayTagContainer),
     /// User defined struct which is simply a list of properties
     Struct(Properties),
@@ -1590,10 +1647,7 @@ impl PropertyValue {
                 write_string(writer, a)?;
                 write_string(writer, b)?;
             }
-            PropertyValue::SoftObjectPath(a, b) => {
-                write_string(writer, a)?;
-                write_string(writer, b)?;
-            }
+            PropertyValue::SoftObjectPath(v) => v.write(writer)?,
             PropertyValue::Object(v) => write_string(writer, v)?,
             PropertyValue::Byte(v) => match v {
                 Byte::Byte(b) => writer.write_u8(*b)?,
@@ -1621,7 +1675,7 @@ impl StructValue {
             StructType::Color => StructValue::Color(Color::read(reader)?),
             StructType::Rotator => StructValue::Rotator(Rotator::read(reader)?),
             StructType::SoftObjectPath => {
-                StructValue::SoftObjectPath(read_string(reader)?, read_string(reader)?)
+                StructValue::SoftObjectPath(SoftObjectPath::read(reader)?)
             }
             StructType::GameplayTagContainer => {
                 StructValue::GameplayTagContainer(GameplayTagContainer::read(reader)?)
@@ -1644,10 +1698,7 @@ impl StructValue {
             StructValue::LinearColor(v) => v.write(writer)?,
             StructValue::Color(v) => v.write(writer)?,
             StructValue::Rotator(v) => v.write(writer)?,
-            StructValue::SoftObjectPath(a, b) => {
-                write_string(writer, a)?;
-                write_string(writer, b)?;
-            }
+            StructValue::SoftObjectPath(v) => v.write(writer)?,
             StructValue::GameplayTagContainer(v) => v.write(writer)?,
             StructValue::Struct(v) => write_properties_none_terminated(writer, v)?,
         }
@@ -2004,8 +2055,7 @@ pub enum Property {
     SoftObject {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<uuid::Uuid>,
-        value: String,
-        value2: String,
+        value: SoftObjectPath,
     },
     Name {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -2189,8 +2239,7 @@ impl Property {
             }),
             PropertyType::SoftObjectProperty => Ok(Property::SoftObject {
                 id: read_optional_uuid(reader)?,
-                value: read_string(reader)?,
-                value2: read_string(reader)?,
+                value: SoftObjectPath::read(reader)?,
             }),
             PropertyType::ObjectProperty => Ok(Property::Object {
                 id: read_optional_uuid(reader)?,
@@ -2407,11 +2456,10 @@ impl Property {
                 writer.write_all(&buf)?;
                 size
             }
-            Property::SoftObject { id, value, value2 } => {
+            Property::SoftObject { id, value } => {
                 write_optional_uuid(writer, *id)?;
                 let mut buf = vec![];
-                writer.stream(&mut buf, |writer| write_string(writer, value))?;
-                writer.stream(&mut buf, |writer| write_string(writer, value2))?;
+                writer.stream(&mut buf, |writer| value.write(writer))?;
                 let size = buf.len();
                 writer.write_all(&buf)?;
                 size
