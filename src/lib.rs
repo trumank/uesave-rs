@@ -2686,22 +2686,29 @@ impl Root {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Save {
     pub header: Header,
-    pub root: Root,
+    pub roots: Vec<Root>,
     pub extra: Vec<u8>,
 }
 impl Save {
     /// Reads save from the given reader
-    pub fn read<R: Read>(reader: &mut R) -> Result<Self, ParseError> {
-        Self::read_with_types(reader, &Types::new())
+    pub fn read<R: Read>(reader: &mut R, stream_length: &usize) -> Result<Self, ParseError> {
+        Self::read_with_types(reader, stream_length, &Types::new())
     }
     /// Reads save from the given reader using the provided [`Types`]
-    pub fn read_with_types<R: Read>(reader: &mut R, types: &Types) -> Result<Self, ParseError> {
+    pub fn read_with_types<R: Read>(reader: &mut R, stream_length: &usize, types: &Types) -> Result<Self, ParseError> {
         let mut reader = SeekReader::new(reader);
 
         Context::run_with_types(types, &mut reader, |reader| {
             let header = Header::read(reader)?;
-            let (root, extra) = reader.header(&header, |reader| -> TResult<_> {
-                let root = Root::read(reader)?;
+            let (roots, extra) = reader.header(&header, |reader| -> TResult<_> {
+                let mut roots = Vec::new();
+                let mut i = 0;
+                while reader.stream.read_bytes < stream_length-4 {
+                    i += 1;
+                    eprintln!("Reading root #{}", i);
+                    let root = Root::read(reader)?;
+                    roots.push(root);
+                }
                 let extra = {
                     let mut buf = vec![];
                     reader.read_to_end(&mut buf)?;
@@ -2713,12 +2720,12 @@ impl Save {
                     }
                     buf
                 };
-                Ok((root, extra))
+                Ok((roots, extra))
             })?;
 
             Ok(Self {
                 header,
-                root,
+                roots,
                 extra,
             })
         })
@@ -2731,7 +2738,11 @@ impl Save {
         Context::run(writer, |writer| {
             writer.header(&self.header, |writer| {
                 self.header.write(writer)?;
-                self.root.write(writer)?;
+                let mut i = 0;
+                while i < self.roots.len() {
+                    self.roots[i].write(writer)?;
+                    i += 1;
+                }
                 writer.write_all(&self.extra)?;
                 Ok(())
             })
