@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{stdin, stdout, BufRead, BufReader, BufWriter, Cursor, Write};
+use std::io::{stdin, stdout, BufRead, BufReader, BufWriter, Cursor, Write, Seek};
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -110,7 +110,11 @@ pub fn main() -> Result<()> {
                 types.add(path, t);
             }
 
-            let save = Save::read_with_types(&mut input(&action.input)?, &types)?;
+            //let mut ins = &mut input(&action.input)?;
+            let mut ins = &mut Cursor::new(fs::read(&action.input)?);
+            let size : usize = ins.seek(std::io::SeekFrom::End(0))?.try_into().unwrap();
+            let _ = ins.rewind()?;
+            let save = Save::read_with_types(&mut ins, &size, &types)?;
             serde_json::to_writer_pretty(output(&action.output)?, &save)?;
         }
         Action::FromJson(io) => {
@@ -134,8 +138,10 @@ pub fn main() -> Result<()> {
             }
 
             let mut input = std::io::Cursor::new(fs::read(path)?);
+            let size : usize = input.seek(std::io::SeekFrom::End(0))?.try_into().unwrap();
+            let _ = input.rewind()?;
             let mut output = std::io::Cursor::new(vec![]);
-            Save::read_with_types(&mut input, &types)?.write(&mut output)?;
+            Save::read_with_types(&mut input, &size, &types)?.write(&mut output)?;
             let (input, output) = (input.into_inner(), output.into_inner());
             if input != output {
                 if action.debug {
@@ -152,7 +158,10 @@ pub fn main() -> Result<()> {
                 types.add(path, t);
             }
 
-            let save = Save::read_with_types(&mut Cursor::new(fs::read(&action.path)?), &types)?;
+            let mut input = &mut Cursor::new(fs::read(&action.path)?);
+            let size : usize = input.seek(std::io::SeekFrom::End(0))?.try_into().unwrap();
+            let _ = input.rewind()?;
+            let save = Save::read_with_types(&mut input, &size, &types)?;
             let modified_save: Save = serde_json::from_slice(&edit::edit_bytes_with_builder(
                 serde_json::to_vec_pretty(&save)?,
                 tempfile::Builder::new().suffix(".json"),
