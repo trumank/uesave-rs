@@ -1,11 +1,9 @@
 use std::fs::File;
 
-use anyhow::Result;
-
 use uesave::{Property, PropertyInner, Save, StructValue, ValueArray};
 
 #[rustfmt::skip]
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let save = Save::read(&mut File::open(
         "examples/space-rig-decorator/PropPack.sav",
     )?)?;

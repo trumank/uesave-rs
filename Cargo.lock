@@ -374,18 +374,25 @@ dependencies = [
 name = "uesave"
 version = "0.5.0"
 dependencies = [
- "anyhow",
  "byteorder",
- "clap",
- "edit",
  "indexmap",
  "pretty_assertions",
  "serde",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "uesave_cli"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "edit",
  "serde_json",
  "shell-words",
  "tempfile",
- "thiserror",
- "uuid",
+ "uesave",
 ]
 
 [[package]]

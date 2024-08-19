@@ -1,0 +1,29 @@
+[package]
+name = "uesave_cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description.workspace = true
+keywords.workspace = true
+license.workspace = true
+
+[package.metadata.wix]
+upgrade-guid = "DC644268-641B-4213-932C-2BC756847797"
+path-guid = "C7E7AFCF-192B-4F04-8C80-F036DC47733C"
+license = false
+eula = false
+
+[[bin]]
+name = "uesave"
+path = "src/main.rs"
+
+[dependencies]
+uesave = { path = "../uesave" }
+anyhow = "1.0.79"
+clap = { version = "4.4.16", features = ["derive"] }
+serde_json = { version = "1.0.111", features = ["preserve_order"] }
+shell-words = "1.1.0"
+tempfile = "3.9.0"
+edit = "0.1.5"
