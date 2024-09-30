@@ -297,15 +297,14 @@ fn write_properties_none_terminated<W: Write>(
 fn read_property<R: Read + Seek>(
     reader: &mut Context<R>,
 ) -> TResult<Option<(PropertyKey, Property)>> {
-    let name = read_string(reader)?;
+    let name = dbg!(read_string(reader)?);
     if name == "None" {
         Ok(None)
     } else {
         reader.scope(&name, |reader| {
-            let t = PropertyType::read(reader)?;
-            let size = reader.read_u32::<LE>()?;
-            let index = reader.read_u32::<LE>()?;
-            let value = Property::read(reader, t, size)?;
+            let tag = dbg!(PropertyTag::read(reader)?);
+            let index = tag.index;
+            let value = Property::read(reader, tag)?; // TODO remove size
             Ok(Some((PropertyKey(index, name.clone()), value)))
         })
     }
@@ -511,6 +510,120 @@ impl<'stream, 'header, 'types, 'scope, R: Read + Seek>
             );
             t
         }))
+    }
+}
+
+#[derive(Debug)]
+struct PropertyTag {
+    type_: PropertyType,
+    id: Option<uuid::Uuid>,
+    size: u32,
+    index: u32,
+    data: PropertyTagData,
+}
+#[derive(Default, Debug)]
+struct PropertyTagData {
+    bool_value: Option<bool>,
+    struct_type: Option<StructType>,
+    struct_id: Option<uuid::Uuid>,
+    array_type: Option<PropertyType>,
+    enum_type: Option<String>,
+
+    key_type: Option<PropertyType>,
+    key_struct_type: Option<Option<StructType>>,
+    value_type: Option<PropertyType>,
+    value_struct_type: Option<Option<StructType>>,
+}
+impl PropertyTag {
+    #[instrument(name = "PropertyTag_read", skip_all)]
+    fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
+        let mut tag = Self {
+            type_: PropertyType::read(reader)?,
+            size: reader.read_u32::<LE>()?,
+            index: reader.read_u32::<LE>()?,
+            id: None,
+            data: Default::default(),
+        };
+        match tag.type_ {
+            PropertyType::BoolProperty => {
+                tag.data.bool_value = Some(reader.read_u8()? > 0);
+                tag.id = read_optional_uuid(reader)?;
+            }
+            PropertyType::IntProperty
+            | PropertyType::Int8Property
+            | PropertyType::Int16Property
+            | PropertyType::Int64Property
+            | PropertyType::UInt8Property
+            | PropertyType::UInt16Property
+            | PropertyType::UInt32Property
+            | PropertyType::UInt64Property
+            | PropertyType::FloatProperty
+            | PropertyType::DoubleProperty
+            | PropertyType::StrProperty
+            | PropertyType::ObjectProperty
+            | PropertyType::FieldPathProperty
+            | PropertyType::SoftObjectProperty
+            | PropertyType::NameProperty
+            | PropertyType::TextProperty
+            | PropertyType::DelegateProperty
+            | PropertyType::MulticastDelegateProperty
+            | PropertyType::MulticastInlineDelegateProperty
+            | PropertyType::MulticastSparseDelegateProperty => {
+                tag.id = read_optional_uuid(reader)?;
+            }
+            PropertyType::ByteProperty | PropertyType::EnumProperty => {
+                tag.data.enum_type = Some(read_string(reader)?);
+                tag.id = read_optional_uuid(reader)?;
+            }
+            PropertyType::ArrayProperty => {
+                tag.data.array_type = Some(PropertyType::read(reader)?);
+                tag.id = read_optional_uuid(reader)?;
+            }
+            PropertyType::SetProperty => {
+                tag.data.key_type = Some(PropertyType::read(reader)?);
+                tag.id = read_optional_uuid(reader)?;
+
+                tag.data.key_struct_type = Some(match tag.data.key_type.as_ref().unwrap() {
+                    PropertyType::StructProperty => {
+                        Some(reader.get_type_or(&StructType::Guid)?.clone())
+                    }
+                    _ => None,
+                });
+            }
+            PropertyType::MapProperty => {
+                tag.data.key_type = Some(PropertyType::read(reader)?);
+                tag.data.value_type = Some(PropertyType::read(reader)?);
+                tag.id = read_optional_uuid(reader)?;
+
+                tag.data.key_struct_type = Some(match tag.data.key_type.as_ref().unwrap() {
+                    PropertyType::StructProperty => Some(
+                        reader
+                            .scope("Key", |r| r.get_type_or(&StructType::Guid))?
+                            .clone(),
+                    ),
+                    _ => None,
+                });
+                tag.data.value_struct_type = Some(match tag.data.value_type.as_ref().unwrap() {
+                    PropertyType::StructProperty => Some(
+                        reader
+                            .scope("Value", |r| r.get_type_or(&StructType::Struct(None)))?
+                            .clone(),
+                    ),
+                    _ => None,
+                });
+            }
+            PropertyType::StructProperty => {
+                tag.data.struct_type = Some(StructType::read(reader)?);
+                tag.data.struct_id = Some(uuid::Uuid::read(reader)?);
+                tag.id = read_optional_uuid(reader)?;
+            }
+            _ => unimplemented!("{:?}", tag.type_),
+        }
+        Ok(tag)
+    }
+    fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
+        todo!();
+        Ok(())
     }
 }
 
@@ -2120,169 +2233,156 @@ impl Property {
         self.inner.get_type()
     }
     #[instrument(name = "Property_read", skip_all)]
-    fn read<R: Read + Seek>(
-        reader: &mut Context<R>,
-        t: PropertyType,
-        size: u32,
-    ) -> TResult<Property> {
-        match t {
+    fn read<R: Read + Seek>(reader: &mut Context<R>, tag: PropertyTag) -> TResult<Property> {
+        match tag.type_ {
             PropertyType::Int8Property => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Int8(reader.read_i8()?),
             }),
             PropertyType::Int16Property => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Int16(reader.read_i16::<LE>()?),
             }),
             PropertyType::IntProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Int(reader.read_i32::<LE>()?),
             }),
             PropertyType::Int64Property => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Int64(reader.read_i64::<LE>()?),
             }),
             PropertyType::UInt8Property => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::UInt8(reader.read_u8()?),
             }),
             PropertyType::UInt16Property => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::UInt16(reader.read_u16::<LE>()?),
             }),
             PropertyType::UInt32Property => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::UInt32(reader.read_u32::<LE>()?),
             }),
             PropertyType::UInt64Property => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::UInt64(reader.read_u64::<LE>()?),
             }),
             PropertyType::FloatProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Float(reader.read_f32::<LE>()?),
             }),
             PropertyType::DoubleProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Double(reader.read_f64::<LE>()?),
             }),
             PropertyType::BoolProperty => Ok(Property {
-                inner: PropertyInner::Bool(reader.read_u8()? > 0),
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
+                inner: PropertyInner::Bool(tag.data.bool_value.unwrap()),
             }),
             PropertyType::ByteProperty => Ok({
-                let enum_type = read_string(reader)?;
-                let id = read_optional_uuid(reader)?;
+                let enum_type = tag.data.enum_type.unwrap();
                 let value = if enum_type == "None" {
                     Byte::Byte(reader.read_u8()?)
                 } else {
                     Byte::Label(read_string(reader)?)
                 };
                 Property {
-                    id,
+                    id: tag.id,
                     inner: PropertyInner::Byte { enum_type, value },
                 }
             }),
             PropertyType::EnumProperty => {
-                let enum_type = read_string(reader)?;
-                let id = read_optional_uuid(reader)?;
-                let value = read_string(reader)?;
+                let enum_type = tag.data.enum_type.unwrap();
                 Ok(Property {
-                    id,
-                    inner: PropertyInner::Enum { enum_type, value },
+                    id: tag.id,
+                    inner: PropertyInner::Enum {
+                        enum_type,
+                        value: read_string(reader)?,
+                    },
                 })
             }
             PropertyType::NameProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Name(read_string(reader)?),
             }),
             PropertyType::StrProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Str(read_string(reader)?),
             }),
             PropertyType::FieldPathProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::FieldPath(FieldPath::read(reader)?),
             }),
             PropertyType::SoftObjectProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::SoftObject(SoftObjectPath::read(reader)?),
             }),
             PropertyType::ObjectProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Object(read_string(reader)?),
             }),
             PropertyType::TextProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Text(Text::read(reader)?),
             }),
             PropertyType::DelegateProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::Delegate(Delegate::read(reader)?),
             }),
             PropertyType::MulticastDelegateProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::MulticastDelegate(MulticastDelegate::read(reader)?),
             }),
             PropertyType::MulticastInlineDelegateProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::MulticastInlineDelegate(MulticastInlineDelegate::read(
                     reader,
                 )?),
             }),
             PropertyType::MulticastSparseDelegateProperty => Ok(Property {
-                id: read_optional_uuid(reader)?,
+                id: tag.id,
                 inner: PropertyInner::MulticastSparseDelegate(MulticastSparseDelegate::read(
                     reader,
                 )?),
             }),
             PropertyType::SetProperty => {
-                let set_type = PropertyType::read(reader)?;
-                let id = read_optional_uuid(reader)?;
                 reader.read_u32::<LE>()?;
-                let struct_type = match set_type {
-                    PropertyType::StructProperty => Some(reader.get_type_or(&StructType::Guid)?),
-                    _ => None,
-                };
-                let value = ValueSet::read(reader, &set_type, struct_type, size - 8)?;
+
+                let key_type = tag.data.key_type.unwrap();
+                let key_struct_type = tag.data.key_struct_type.unwrap();
+
+                let value =
+                    ValueSet::read(reader, &key_type, key_struct_type.as_ref(), tag.size - 8)?;
                 Ok(Property {
-                    id,
-                    inner: PropertyInner::Set { set_type, value },
+                    id: tag.id,
+                    inner: PropertyInner::Set {
+                        set_type: key_type,
+                        value,
+                    },
                 })
             }
             PropertyType::MapProperty => {
-                let key_type = PropertyType::read(reader)?;
-                let value_type = PropertyType::read(reader)?;
-                let id = read_optional_uuid(reader)?;
                 reader.read_u32::<LE>()?;
                 let count = reader.read_u32::<LE>()?;
                 let mut value = vec![];
 
-                let key_struct_type = match key_type {
-                    PropertyType::StructProperty => {
-                        Some(reader.scope("Key", |r| r.get_type_or(&StructType::Guid))?)
-                    }
-                    _ => None,
-                };
-                let value_struct_type = match value_type {
-                    PropertyType::StructProperty => {
-                        Some(reader.scope("Value", |r| r.get_type_or(&StructType::Struct(None)))?)
-                    }
-                    _ => None,
-                };
+                let key_type = tag.data.key_type.unwrap();
+                let key_struct_type = tag.data.key_struct_type.unwrap();
+                let value_type = tag.data.value_type.unwrap();
+                let value_struct_type = tag.data.value_struct_type.unwrap();
 
                 for _ in 0..count {
                     value.push(MapEntry::read(
                         reader,
                         &key_type,
-                        key_struct_type,
+                        key_struct_type.as_ref(),
                         &value_type,
-                        value_struct_type,
+                        value_struct_type.as_ref(),
                     )?)
                 }
 
                 Ok(Property {
-                    id,
+                    id: tag.id,
                     inner: PropertyInner::Map {
                         key_type,
                         value_type,
@@ -2291,12 +2391,11 @@ impl Property {
                 })
             }
             PropertyType::StructProperty => {
-                let struct_type = StructType::read(reader)?;
-                let struct_id = uuid::Uuid::read(reader)?;
-                let id = read_optional_uuid(reader)?;
+                let struct_type = tag.data.struct_type.unwrap();
+                let struct_id = tag.data.struct_id.unwrap();
                 let value = StructValue::read(reader, &struct_type)?;
                 Ok(Property {
-                    id,
+                    id: tag.id,
                     inner: PropertyInner::Struct {
                         struct_type,
                         struct_id,
@@ -2305,12 +2404,11 @@ impl Property {
                 })
             }
             PropertyType::ArrayProperty => {
-                let array_type = PropertyType::read(reader)?;
-                let id = read_optional_uuid(reader)?;
-                let value = ValueArray::read(reader, &array_type, size - 4)?;
+                let array_type = tag.data.array_type.unwrap();
+                let value = ValueArray::read(reader, &array_type, tag.size - 4)?;
 
                 Ok(Property {
-                    id,
+                    id: tag.id,
                     inner: PropertyInner::Array { array_type, value },
                 })
             }
