@@ -633,6 +633,9 @@ impl PropertyTag {
                     tag.data.inner_type_data =
                         Some(std::boxed::Box::new(PropertyTagData::new(inner_type)));
                 }
+                PropertyType::EnumProperty | PropertyType::ByteProperty => {
+                    tag.data.enum_type = Some(nodes[1].name.clone());
+                }
                 _ => {} //unimplemented!("{:?}", tag.type_),
             }
 
@@ -1881,7 +1884,7 @@ pub enum ValueArray {
         name: String,
         type_: PropertyType,
         struct_type: StructType,
-        id: uuid::Uuid,
+        id: Option<uuid::Uuid>,
         value: Vec<StructValue>,
     },
 }
@@ -2200,10 +2203,10 @@ impl ValueArray {
                     value.push(StructValue::read(reader, &struct_type)?);
                 }
                 ValueArray::Struct {
-                    name: tag_data.name.unwrap(),
+                    name: tag_data.name.unwrap_or_default(),
                     type_: tag_data.type_,
                     struct_type,
-                    id: tag_data.struct_id.unwrap(),
+                    id: tag_data.struct_id,
                     value,
                 }
             }
@@ -2228,7 +2231,9 @@ impl ValueArray {
                 }
                 writer.write_u64::<LE>(buf.len() as u64)?;
                 struct_type.write(writer)?;
-                id.write(writer)?;
+                if let Some(id) = id {
+                    id.write(writer)?;
+                }
                 writer.write_u8(0)?;
                 writer.write_all(&buf)?;
             }
