@@ -527,6 +527,7 @@ struct PropertyTagData {
     struct_type: Option<StructType>,
     struct_id: Option<uuid::Uuid>,
     inner_type: Option<PropertyType>,
+    inner_type_data: Option<std::boxed::Box<PropertyTag>>,
     enum_type: Option<String>,
 
     key_type: Option<PropertyType>,
@@ -587,8 +588,18 @@ impl PropertyTag {
                     // TODO
                 }
                 PropertyType::ArrayProperty => {
-                    tag.data.inner_type = Some(PropertyType::try_from(&nodes[1].name)?);
-                    // TODO
+                    let inner_type = PropertyType::try_from(&nodes[1].name)?;
+                    tag.data.inner_type = Some(inner_type);
+                    tag.data.inner_type_data = Some(std::boxed::Box::new(PropertyTag {
+                        type_: inner_type,
+                        size: 0,
+                        index: 0,
+                        id: None,
+                        data: PropertyTagData {
+                            struct_type: Some(StructType::Struct(None)),
+                            ..Default::default()
+                        },
+                    }));
                 }
                 _ => {} //unimplemented!("{:?}", tag.type_),
             }
@@ -653,8 +664,21 @@ impl PropertyTag {
                     tag.id = read_optional_uuid(reader)?;
                 }
                 PropertyType::ArrayProperty => {
-                    tag.data.inner_type = Some(PropertyType::read(reader)?);
+                    let inner_type = PropertyType::read(reader)?;
+                    tag.data.inner_type = Some(inner_type);
                     tag.id = read_optional_uuid(reader)?;
+
+                    tag.data.inner_type = Some(inner_type);
+                    tag.data.inner_type_data = Some(std::boxed::Box::new(PropertyTag {
+                        type_: inner_type,
+                        size: 0,
+                        index: 0,
+                        id: None,
+                        data: PropertyTagData {
+                            struct_type: Some(StructType::Struct(None)),
+                            ..Default::default()
+                        },
+                    }));
                 }
                 PropertyType::SetProperty => {
                     tag.data.key_type = Some(PropertyType::read(reader)?);
@@ -704,7 +728,7 @@ impl PropertyTag {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PropertyType {
     IntProperty,
     Int8Property,
@@ -2132,7 +2156,7 @@ impl ValueArray {
                     let tag = PropertyTag::read(reader)?;
                     (name, tag)
                 } else {
-                    todo!();
+                    ("".to_string(), tag)
                 };
 
                 let struct_type = tag.data.struct_type.unwrap();
@@ -2487,22 +2511,14 @@ impl Property {
                 })
             }
             PropertyType::ArrayProperty => {
-                let array_type = tag.data.inner_type.unwrap();
-                let value = ValueArray::read(
-                    reader,
-                    // TODO fix this mess
-                    PropertyTag {
-                        type_: array_type.clone(),
-                        id: None,
-                        data: Default::default(),
-                        index: 0,
-                        size: 0,
-                    },
-                    tag.size - 4,
-                )?;
+                let id = tag.id;
+                let size = tag.size;
+                let tag = tag.data.inner_type_data.unwrap();
+                let array_type = tag.type_;
+                let value = ValueArray::read(reader, *tag, size - 4)?;
 
                 Ok(Property {
-                    id: tag.id,
+                    id,
                     inner: PropertyInner::Array { array_type, value },
                 })
             }
