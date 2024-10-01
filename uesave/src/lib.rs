@@ -304,7 +304,7 @@ fn read_property<R: Read + Seek>(
         reader.scope(&name, |reader| {
             let tag = dbg!(PropertyTag::read(reader)?);
             let index = tag.index;
-            let value = Property::read(reader, tag)?; // TODO remove size
+            let value = Property::read(reader, tag)?;
             Ok(Some((PropertyKey(index, name.clone()), value)))
         })
     }
@@ -526,7 +526,7 @@ struct PropertyTagData {
     bool_value: Option<bool>,
     struct_type: Option<StructType>,
     struct_id: Option<uuid::Uuid>,
-    array_type: Option<PropertyType>,
+    inner_type: Option<PropertyType>,
     enum_type: Option<String>,
 
     key_type: Option<PropertyType>,
@@ -534,100 +534,177 @@ struct PropertyTagData {
     value_type: Option<PropertyType>,
     value_struct_type: Option<Option<StructType>>,
 }
+#[derive(Default, Debug)]
+struct FPropertyTypeNameNode {
+    name: String,
+    inner_count: usize,
+}
+impl FPropertyTypeNameNode {
+    #[instrument(name = "FPropertyTypeNameNode_read", skip_all)]
+    fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
+        Ok(Self {
+            name: read_string(reader)?,
+            inner_count: reader.read_u32::<LE>()? as usize,
+        })
+    }
+}
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy)]
+    struct EPropertyTagFlags : u8 {
+        const None = 0x00;
+        const HasArrayIndex = 0x01;
+        const HasPropertyGuid = 0x02;
+        const HasPropertyExtensions = 0x04;
+        const HasBinaryOrNativeSerialize = 0x08;
+        const BoolTrue = 0x10;
+    }
+}
 impl PropertyTag {
     #[instrument(name = "PropertyTag_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
-        let mut tag = Self {
-            type_: PropertyType::read(reader)?,
-            size: reader.read_u32::<LE>()?,
-            index: reader.read_u32::<LE>()?,
-            id: None,
-            data: Default::default(),
-        };
-        match tag.type_ {
-            PropertyType::BoolProperty => {
-                tag.data.bool_value = Some(reader.read_u8()? > 0);
-                tag.id = read_optional_uuid(reader)?;
+        if reader.header.unwrap().property_tag() {
+            let mut nodes = vec![];
+            let mut remaining = 1;
+            while remaining > 0 {
+                let node = FPropertyTypeNameNode::read(reader)?;
+                remaining += node.inner_count - 1;
+                nodes.push(dbg!(node));
             }
-            PropertyType::IntProperty
-            | PropertyType::Int8Property
-            | PropertyType::Int16Property
-            | PropertyType::Int64Property
-            | PropertyType::UInt8Property
-            | PropertyType::UInt16Property
-            | PropertyType::UInt32Property
-            | PropertyType::UInt64Property
-            | PropertyType::FloatProperty
-            | PropertyType::DoubleProperty
-            | PropertyType::StrProperty
-            | PropertyType::ObjectProperty
-            | PropertyType::FieldPathProperty
-            | PropertyType::SoftObjectProperty
-            | PropertyType::NameProperty
-            | PropertyType::TextProperty
-            | PropertyType::DelegateProperty
-            | PropertyType::MulticastDelegateProperty
-            | PropertyType::MulticastInlineDelegateProperty
-            | PropertyType::MulticastSparseDelegateProperty => {
-                tag.id = read_optional_uuid(reader)?;
+            let mut tag = Self {
+                type_: PropertyType::try_from(&nodes[0].name)?,
+                size: 0,  // TODO
+                index: 0, // TODO
+                id: None,
+                data: Default::default(),
+            };
+            match tag.type_ {
+                PropertyType::BoolProperty => {
+                    tag.data.bool_value = Some(false);
+                }
+                PropertyType::StructProperty => {
+                    tag.data.struct_id = Some(Default::default());
+                    tag.data.struct_type = Some(StructType::from(nodes[1].name.clone()));
+                    // TODO
+                }
+                PropertyType::ArrayProperty => {
+                    tag.data.inner_type = Some(PropertyType::try_from(&nodes[1].name)?);
+                    // TODO
+                }
+                _ => {} //unimplemented!("{:?}", tag.type_),
             }
-            PropertyType::ByteProperty | PropertyType::EnumProperty => {
-                tag.data.enum_type = Some(read_string(reader)?);
-                tag.id = read_optional_uuid(reader)?;
-            }
-            PropertyType::ArrayProperty => {
-                tag.data.array_type = Some(PropertyType::read(reader)?);
-                tag.id = read_optional_uuid(reader)?;
-            }
-            PropertyType::SetProperty => {
-                tag.data.key_type = Some(PropertyType::read(reader)?);
-                tag.id = read_optional_uuid(reader)?;
 
-                tag.data.key_struct_type = Some(match tag.data.key_type.as_ref().unwrap() {
-                    PropertyType::StructProperty => {
-                        Some(reader.get_type_or(&StructType::Guid)?.clone())
-                    }
-                    _ => None,
-                });
-            }
-            PropertyType::MapProperty => {
-                tag.data.key_type = Some(PropertyType::read(reader)?);
-                tag.data.value_type = Some(PropertyType::read(reader)?);
-                tag.id = read_optional_uuid(reader)?;
+            tag.size = reader.read_u32::<LE>()?;
 
-                tag.data.key_struct_type = Some(match tag.data.key_type.as_ref().unwrap() {
-                    PropertyType::StructProperty => Some(
-                        reader
-                            .scope("Key", |r| r.get_type_or(&StructType::Guid))?
-                            .clone(),
-                    ),
-                    _ => None,
-                });
-                tag.data.value_struct_type = Some(match tag.data.value_type.as_ref().unwrap() {
-                    PropertyType::StructProperty => Some(
-                        reader
-                            .scope("Value", |r| r.get_type_or(&StructType::Struct(None)))?
-                            .clone(),
-                    ),
-                    _ => None,
-                });
+            let flags = EPropertyTagFlags::from_bits(reader.read_u8()?)
+                .ok_or_else(|| error::Error::Other("unknown EPropertyTagFlags bits".into()))?;
+            dbg!(flags);
+
+            if flags.contains(EPropertyTagFlags::BoolTrue) {
+                tag.data.bool_value = Some(true);
             }
-            PropertyType::StructProperty => {
-                tag.data.struct_type = Some(StructType::read(reader)?);
-                tag.data.struct_id = Some(uuid::Uuid::read(reader)?);
-                tag.id = read_optional_uuid(reader)?;
+            if flags.contains(EPropertyTagFlags::HasArrayIndex) {
+                tag.index = reader.read_u32::<LE>()?;
             }
-            _ => unimplemented!("{:?}", tag.type_),
+            if flags.contains(EPropertyTagFlags::HasPropertyGuid) {
+                tag.id = Some(uuid::Uuid::read(reader)?);
+            }
+            if flags.contains(EPropertyTagFlags::HasPropertyExtensions) {
+                unimplemented!();
+            }
+
+            Ok(tag)
+        } else {
+            let mut tag = Self {
+                type_: PropertyType::read(reader)?,
+                size: reader.read_u32::<LE>()?,
+                index: reader.read_u32::<LE>()?,
+                id: None,
+                data: Default::default(),
+            };
+            match tag.type_ {
+                PropertyType::BoolProperty => {
+                    tag.data.bool_value = Some(reader.read_u8()? > 0);
+                    tag.id = read_optional_uuid(reader)?;
+                }
+                PropertyType::IntProperty
+                | PropertyType::Int8Property
+                | PropertyType::Int16Property
+                | PropertyType::Int64Property
+                | PropertyType::UInt8Property
+                | PropertyType::UInt16Property
+                | PropertyType::UInt32Property
+                | PropertyType::UInt64Property
+                | PropertyType::FloatProperty
+                | PropertyType::DoubleProperty
+                | PropertyType::StrProperty
+                | PropertyType::ObjectProperty
+                | PropertyType::FieldPathProperty
+                | PropertyType::SoftObjectProperty
+                | PropertyType::NameProperty
+                | PropertyType::TextProperty
+                | PropertyType::DelegateProperty
+                | PropertyType::MulticastDelegateProperty
+                | PropertyType::MulticastInlineDelegateProperty
+                | PropertyType::MulticastSparseDelegateProperty => {
+                    tag.id = read_optional_uuid(reader)?;
+                }
+                PropertyType::ByteProperty | PropertyType::EnumProperty => {
+                    tag.data.enum_type = Some(read_string(reader)?);
+                    tag.id = read_optional_uuid(reader)?;
+                }
+                PropertyType::ArrayProperty => {
+                    tag.data.inner_type = Some(PropertyType::read(reader)?);
+                    tag.id = read_optional_uuid(reader)?;
+                }
+                PropertyType::SetProperty => {
+                    tag.data.key_type = Some(PropertyType::read(reader)?);
+                    tag.id = read_optional_uuid(reader)?;
+
+                    tag.data.key_struct_type = Some(match tag.data.key_type.as_ref().unwrap() {
+                        PropertyType::StructProperty => {
+                            Some(reader.get_type_or(&StructType::Guid)?.clone())
+                        }
+                        _ => None,
+                    });
+                }
+                PropertyType::MapProperty => {
+                    tag.data.key_type = Some(PropertyType::read(reader)?);
+                    tag.data.value_type = Some(PropertyType::read(reader)?);
+                    tag.id = read_optional_uuid(reader)?;
+
+                    tag.data.key_struct_type = Some(match tag.data.key_type.as_ref().unwrap() {
+                        PropertyType::StructProperty => Some(
+                            reader
+                                .scope("Key", |r| r.get_type_or(&StructType::Guid))?
+                                .clone(),
+                        ),
+                        _ => None,
+                    });
+                    tag.data.value_struct_type =
+                        Some(match tag.data.value_type.as_ref().unwrap() {
+                            PropertyType::StructProperty => Some(
+                                reader
+                                    .scope("Value", |r| r.get_type_or(&StructType::Struct(None)))?
+                                    .clone(),
+                            ),
+                            _ => None,
+                        });
+                }
+                PropertyType::StructProperty => {
+                    tag.data.struct_type = Some(StructType::read(reader)?);
+                    tag.data.struct_id = Some(uuid::Uuid::read(reader)?);
+                    tag.id = read_optional_uuid(reader)?;
+                }
+            }
+            Ok(tag)
         }
-        Ok(tag)
     }
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
         todo!();
-        Ok(())
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PropertyType {
     IntProperty,
     Int8Property,
@@ -691,8 +768,10 @@ impl PropertyType {
     }
     #[instrument(name = "PropertyType_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
-        let t = read_string(reader)?;
-        match t.as_str() {
+        Self::try_from(&read_string(reader)?)
+    }
+    fn try_from(name: &str) -> TResult<Self> {
+        match name {
             "Int8Property" => Ok(PropertyType::Int8Property),
             "Int16Property" => Ok(PropertyType::Int16Property),
             "IntProperty" => Ok(PropertyType::IntProperty),
@@ -720,7 +799,7 @@ impl PropertyType {
             "SetProperty" => Ok(PropertyType::SetProperty),
             "MapProperty" => Ok(PropertyType::MapProperty),
             "StructProperty" => Ok(PropertyType::StructProperty),
-            _ => Err(Error::UnknownPropertyType(format!("{t:?}"))),
+            _ => Err(Error::UnknownPropertyType(format!("{name:?}"))),
         }
     }
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
@@ -1739,8 +1818,8 @@ pub enum ValueVec {
 pub enum ValueArray {
     Base(ValueVec),
     Struct {
-        _type: String,
         name: String,
+        type_: PropertyType,
         struct_type: StructType,
         id: uuid::Uuid,
         value: Vec<StructValue>,
@@ -2042,45 +2121,49 @@ impl ValueArray {
     #[instrument(name = "ValueArray_read", skip_all)]
     fn read<R: Read + Seek>(
         reader: &mut Context<R>,
-        t: &PropertyType,
+        tag: PropertyTag,
         size: u32,
     ) -> TResult<ValueArray> {
         let count = reader.read_u32::<LE>()?;
-        Ok(match t {
+        Ok(match &tag.type_ {
             PropertyType::StructProperty => {
-                let _type = read_string(reader)?;
-                let name = read_string(reader)?;
-                let _size = reader.read_u64::<LE>()?;
-                let struct_type = StructType::read(reader)?;
-                let id = uuid::Uuid::read(reader)?;
-                reader.read_u8()?;
+                let (name, tag) = if !reader.header.unwrap().property_tag() {
+                    let name = read_string(reader)?;
+                    let tag = PropertyTag::read(reader)?;
+                    (name, tag)
+                } else {
+                    todo!();
+                };
+
+                let struct_type = tag.data.struct_type.unwrap();
+
                 let mut value = vec![];
                 for _ in 0..count {
                     value.push(StructValue::read(reader, &struct_type)?);
                 }
                 ValueArray::Struct {
-                    _type,
                     name,
+                    type_: tag.type_,
                     struct_type,
-                    id,
+                    id: tag.data.struct_id.unwrap(),
                     value,
                 }
             }
-            _ => ValueArray::Base(ValueVec::read(reader, t, size, count)?),
+            _ => ValueArray::Base(ValueVec::read(reader, &tag.type_, size, count)?),
         })
     }
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
         match &self {
             ValueArray::Struct {
-                _type,
-                name,
+                name: _type,
+                type_: name,
                 struct_type,
                 id,
                 value,
             } => {
                 writer.write_u32::<LE>(value.len() as u32)?;
                 write_string(writer, _type)?;
-                write_string(writer, name)?;
+                name.write(writer)?;
                 let mut buf = vec![];
                 for v in value {
                     writer.stream(&mut buf, |writer| v.write(writer))?;
@@ -2404,8 +2487,19 @@ impl Property {
                 })
             }
             PropertyType::ArrayProperty => {
-                let array_type = tag.data.array_type.unwrap();
-                let value = ValueArray::read(reader, &array_type, tag.size - 4)?;
+                let array_type = tag.data.inner_type.unwrap();
+                let value = ValueArray::read(
+                    reader,
+                    // TODO fix this mess
+                    PropertyTag {
+                        type_: array_type.clone(),
+                        id: None,
+                        data: Default::default(),
+                        index: 0,
+                        size: 0,
+                    },
+                    tag.size - 4,
+                )?;
 
                 Ok(Property {
                     id: tag.id,
@@ -2754,6 +2848,9 @@ impl Header {
     fn large_world_coordinates(&self) -> bool {
         self.engine_version_major >= 5
     }
+    fn property_tag(&self) -> bool {
+        self.engine_version_major >= 5 && self.engine_version_minor >= 4
+    }
 }
 impl<R: Read + Seek> Readable<R> for Header {
     #[instrument(name = "Header_read", skip_all)]
@@ -2819,9 +2916,14 @@ pub struct Root {
 impl Root {
     #[instrument(name = "Root_read", skip_all)]
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
+        let save_game_type = read_string(reader)?;
+        if reader.header.unwrap().property_tag() {
+            reader.read_u8()?;
+        }
+        let properties = read_properties_until_none(reader)?;
         Ok(Self {
-            save_game_type: read_string(reader)?,
-            properties: read_properties_until_none(reader)?,
+            save_game_type,
+            properties,
         })
     }
     #[instrument(name = "Root_write", skip_all)]
