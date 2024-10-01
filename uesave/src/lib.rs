@@ -297,16 +297,14 @@ fn write_properties_none_terminated<W: Write>(
 fn read_property<R: Read + Seek>(
     reader: &mut Context<R>,
 ) -> TResult<Option<(PropertyKey, Property)>> {
-    let name = dbg!(read_string(reader)?);
-    if name == "None" {
-        Ok(None)
+    if let Some(tag) = PropertyTag::read(reader)? {
+        dbg!(&tag);
+        let index = tag.index;
+        let name = tag.name.clone();
+        let value = reader.scope(&name, |reader| Property::read(reader, tag))?;
+        Ok(Some((PropertyKey(index, name), value)))
     } else {
-        reader.scope(&name, |reader| {
-            let tag = dbg!(PropertyTag::read(reader)?);
-            let index = tag.index;
-            let value = Property::read(reader, tag)?;
-            Ok(Some((PropertyKey(index, name.clone()), value)))
-        })
+        Ok(None)
     }
 }
 #[instrument(skip_all)]
@@ -515,25 +513,57 @@ impl<'stream, 'header, 'types, 'scope, R: Read + Seek>
 
 #[derive(Debug)]
 struct PropertyTag {
+    name: String,
     type_: PropertyType,
     id: Option<uuid::Uuid>,
     size: u32,
     index: u32,
     data: PropertyTagData,
 }
-#[derive(Default, Debug)]
+#[derive(Debug)]
 struct PropertyTagData {
+    name: Option<String>,
+    type_: PropertyType,
+
     bool_value: Option<bool>,
     struct_type: Option<StructType>,
     struct_id: Option<uuid::Uuid>,
     inner_type: Option<PropertyType>,
-    inner_type_data: Option<std::boxed::Box<PropertyTag>>,
+    inner_type_data: Option<std::boxed::Box<PropertyTagData>>,
     enum_type: Option<String>,
 
     key_type: Option<PropertyType>,
     key_struct_type: Option<Option<StructType>>,
     value_type: Option<PropertyType>,
     value_struct_type: Option<Option<StructType>>,
+}
+impl Default for PropertyTagData {
+    fn default() -> Self {
+        Self {
+            name: None,
+            type_: PropertyType::ArrayProperty, // filler
+            bool_value: None,
+            struct_type: None,
+            struct_id: None,
+            inner_type: None,
+            inner_type_data: None,
+            enum_type: None,
+            key_type: None,
+            key_struct_type: None,
+            value_type: None,
+            value_struct_type: None,
+        }
+    }
+}
+impl PropertyTagData {
+    fn new(type_: PropertyType) -> Self {
+        Self {
+            name: None,
+            type_,
+            struct_type: Some(StructType::Struct(None)),
+            ..Default::default()
+        }
+    }
 }
 #[derive(Default, Debug)]
 struct FPropertyTypeNameNode {
@@ -562,7 +592,11 @@ bitflags::bitflags! {
 }
 impl PropertyTag {
     #[instrument(name = "PropertyTag_read", skip_all)]
-    fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
+    fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Option<Self>> {
+        let name = read_string(reader)?;
+        if name == "None" {
+            return Ok(None);
+        }
         if reader.header.unwrap().property_tag() {
             let mut nodes = vec![];
             let mut remaining = 1;
@@ -571,12 +605,18 @@ impl PropertyTag {
                 remaining += node.inner_count - 1;
                 nodes.push(dbg!(node));
             }
+            let type_ = PropertyType::try_from(&nodes[0].name)?;
             let mut tag = Self {
-                type_: PropertyType::try_from(&nodes[0].name)?,
-                size: 0,  // TODO
-                index: 0, // TODO
+                name: name.clone(),
+                type_,
+                size: 0,
+                index: 0,
                 id: None,
-                data: Default::default(),
+                data: PropertyTagData {
+                    name: Some(name),
+                    type_,
+                    ..Default::default()
+                },
             };
             match tag.type_ {
                 PropertyType::BoolProperty => {
@@ -590,16 +630,8 @@ impl PropertyTag {
                 PropertyType::ArrayProperty => {
                     let inner_type = PropertyType::try_from(&nodes[1].name)?;
                     tag.data.inner_type = Some(inner_type);
-                    tag.data.inner_type_data = Some(std::boxed::Box::new(PropertyTag {
-                        type_: inner_type,
-                        size: 0,
-                        index: 0,
-                        id: None,
-                        data: PropertyTagData {
-                            struct_type: Some(StructType::Struct(None)),
-                            ..Default::default()
-                        },
-                    }));
+                    tag.data.inner_type_data =
+                        Some(std::boxed::Box::new(PropertyTagData::new(inner_type)));
                 }
                 _ => {} //unimplemented!("{:?}", tag.type_),
             }
@@ -623,104 +655,108 @@ impl PropertyTag {
                 unimplemented!();
             }
 
-            Ok(tag)
+            Ok(Some(tag))
         } else {
-            let mut tag = Self {
-                type_: PropertyType::read(reader)?,
-                size: reader.read_u32::<LE>()?,
-                index: reader.read_u32::<LE>()?,
-                id: None,
-                data: Default::default(),
-            };
-            match tag.type_ {
-                PropertyType::BoolProperty => {
-                    tag.data.bool_value = Some(reader.read_u8()? > 0);
-                    tag.id = read_optional_uuid(reader)?;
-                }
-                PropertyType::IntProperty
-                | PropertyType::Int8Property
-                | PropertyType::Int16Property
-                | PropertyType::Int64Property
-                | PropertyType::UInt8Property
-                | PropertyType::UInt16Property
-                | PropertyType::UInt32Property
-                | PropertyType::UInt64Property
-                | PropertyType::FloatProperty
-                | PropertyType::DoubleProperty
-                | PropertyType::StrProperty
-                | PropertyType::ObjectProperty
-                | PropertyType::FieldPathProperty
-                | PropertyType::SoftObjectProperty
-                | PropertyType::NameProperty
-                | PropertyType::TextProperty
-                | PropertyType::DelegateProperty
-                | PropertyType::MulticastDelegateProperty
-                | PropertyType::MulticastInlineDelegateProperty
-                | PropertyType::MulticastSparseDelegateProperty => {
-                    tag.id = read_optional_uuid(reader)?;
-                }
-                PropertyType::ByteProperty | PropertyType::EnumProperty => {
-                    tag.data.enum_type = Some(read_string(reader)?);
-                    tag.id = read_optional_uuid(reader)?;
-                }
-                PropertyType::ArrayProperty => {
-                    let inner_type = PropertyType::read(reader)?;
-                    tag.data.inner_type = Some(inner_type);
-                    tag.id = read_optional_uuid(reader)?;
+            reader.scope(&name.clone(), |reader| {
+                let type_ = PropertyType::read(reader)?;
+                let mut tag = Self {
+                    name: name.clone(),
+                    type_,
+                    size: reader.read_u32::<LE>()?,
+                    index: reader.read_u32::<LE>()?,
+                    id: None,
+                    data: PropertyTagData {
+                        name: Some(name),
+                        type_,
+                        ..Default::default()
+                    },
+                };
+                match tag.type_ {
+                    PropertyType::BoolProperty => {
+                        tag.data.bool_value = Some(reader.read_u8()? > 0);
+                        tag.id = read_optional_uuid(reader)?;
+                    }
+                    PropertyType::IntProperty
+                    | PropertyType::Int8Property
+                    | PropertyType::Int16Property
+                    | PropertyType::Int64Property
+                    | PropertyType::UInt8Property
+                    | PropertyType::UInt16Property
+                    | PropertyType::UInt32Property
+                    | PropertyType::UInt64Property
+                    | PropertyType::FloatProperty
+                    | PropertyType::DoubleProperty
+                    | PropertyType::StrProperty
+                    | PropertyType::ObjectProperty
+                    | PropertyType::FieldPathProperty
+                    | PropertyType::SoftObjectProperty
+                    | PropertyType::NameProperty
+                    | PropertyType::TextProperty
+                    | PropertyType::DelegateProperty
+                    | PropertyType::MulticastDelegateProperty
+                    | PropertyType::MulticastInlineDelegateProperty
+                    | PropertyType::MulticastSparseDelegateProperty => {
+                        tag.id = read_optional_uuid(reader)?;
+                    }
+                    PropertyType::ByteProperty | PropertyType::EnumProperty => {
+                        tag.data.enum_type = Some(read_string(reader)?);
+                        tag.id = read_optional_uuid(reader)?;
+                    }
+                    PropertyType::ArrayProperty => {
+                        let inner_type = PropertyType::read(reader)?;
+                        tag.data.inner_type = Some(inner_type);
+                        tag.id = read_optional_uuid(reader)?;
 
-                    tag.data.inner_type = Some(inner_type);
-                    tag.data.inner_type_data = Some(std::boxed::Box::new(PropertyTag {
-                        type_: inner_type,
-                        size: 0,
-                        index: 0,
-                        id: None,
-                        data: PropertyTagData {
-                            struct_type: Some(StructType::Struct(None)),
-                            ..Default::default()
-                        },
-                    }));
-                }
-                PropertyType::SetProperty => {
-                    tag.data.key_type = Some(PropertyType::read(reader)?);
-                    tag.id = read_optional_uuid(reader)?;
+                        tag.data.inner_type = Some(inner_type);
+                        tag.data.inner_type_data =
+                            Some(std::boxed::Box::new(PropertyTagData::new(inner_type)));
+                    }
+                    PropertyType::SetProperty => {
+                        tag.data.key_type = Some(PropertyType::read(reader)?);
+                        tag.id = read_optional_uuid(reader)?;
 
-                    tag.data.key_struct_type = Some(match tag.data.key_type.as_ref().unwrap() {
-                        PropertyType::StructProperty => {
-                            Some(reader.get_type_or(&StructType::Guid)?.clone())
-                        }
-                        _ => None,
-                    });
-                }
-                PropertyType::MapProperty => {
-                    tag.data.key_type = Some(PropertyType::read(reader)?);
-                    tag.data.value_type = Some(PropertyType::read(reader)?);
-                    tag.id = read_optional_uuid(reader)?;
+                        tag.data.key_struct_type =
+                            Some(match tag.data.key_type.as_ref().unwrap() {
+                                PropertyType::StructProperty => {
+                                    Some(reader.get_type_or(&StructType::Guid)?.clone())
+                                }
+                                _ => None,
+                            });
+                    }
+                    PropertyType::MapProperty => {
+                        tag.data.key_type = Some(PropertyType::read(reader)?);
+                        tag.data.value_type = Some(PropertyType::read(reader)?);
+                        tag.id = read_optional_uuid(reader)?;
 
-                    tag.data.key_struct_type = Some(match tag.data.key_type.as_ref().unwrap() {
-                        PropertyType::StructProperty => Some(
-                            reader
-                                .scope("Key", |r| r.get_type_or(&StructType::Guid))?
-                                .clone(),
-                        ),
-                        _ => None,
-                    });
-                    tag.data.value_struct_type =
-                        Some(match tag.data.value_type.as_ref().unwrap() {
-                            PropertyType::StructProperty => Some(
-                                reader
-                                    .scope("Value", |r| r.get_type_or(&StructType::Struct(None)))?
-                                    .clone(),
-                            ),
-                            _ => None,
-                        });
+                        tag.data.key_struct_type =
+                            Some(match tag.data.key_type.as_ref().unwrap() {
+                                PropertyType::StructProperty => Some(
+                                    reader
+                                        .scope("Key", |r| r.get_type_or(&StructType::Guid))?
+                                        .clone(),
+                                ),
+                                _ => None,
+                            });
+                        tag.data.value_struct_type =
+                            Some(match tag.data.value_type.as_ref().unwrap() {
+                                PropertyType::StructProperty => Some(
+                                    reader
+                                        .scope("Value", |r| {
+                                            r.get_type_or(&StructType::Struct(None))
+                                        })?
+                                        .clone(),
+                                ),
+                                _ => None,
+                            });
+                    }
+                    PropertyType::StructProperty => {
+                        tag.data.struct_type = Some(StructType::read(reader)?);
+                        tag.data.struct_id = Some(uuid::Uuid::read(reader)?);
+                        tag.id = read_optional_uuid(reader)?;
+                    }
                 }
-                PropertyType::StructProperty => {
-                    tag.data.struct_type = Some(StructType::read(reader)?);
-                    tag.data.struct_id = Some(uuid::Uuid::read(reader)?);
-                    tag.id = read_optional_uuid(reader)?;
-                }
-            }
-            Ok(tag)
+                Ok(Some(tag))
+            })
         }
     }
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
@@ -2145,35 +2181,33 @@ impl ValueArray {
     #[instrument(name = "ValueArray_read", skip_all)]
     fn read<R: Read + Seek>(
         reader: &mut Context<R>,
-        tag: PropertyTag,
+        tag_data: PropertyTagData,
         size: u32,
     ) -> TResult<ValueArray> {
         let count = reader.read_u32::<LE>()?;
-        Ok(match &tag.type_ {
+        Ok(match &tag_data.type_ {
             PropertyType::StructProperty => {
-                let (name, tag) = if !reader.header.unwrap().property_tag() {
-                    let name = read_string(reader)?;
-                    let tag = PropertyTag::read(reader)?;
-                    (name, tag)
+                let tag_data = if !reader.header.unwrap().property_tag() {
+                    PropertyTag::read(reader)?.unwrap().data
                 } else {
-                    ("".to_string(), tag)
+                    tag_data
                 };
 
-                let struct_type = tag.data.struct_type.unwrap();
+                let struct_type = tag_data.struct_type.unwrap();
 
                 let mut value = vec![];
                 for _ in 0..count {
                     value.push(StructValue::read(reader, &struct_type)?);
                 }
                 ValueArray::Struct {
-                    name,
-                    type_: tag.type_,
+                    name: tag_data.name.unwrap(),
+                    type_: tag_data.type_,
                     struct_type,
-                    id: tag.data.struct_id.unwrap(),
+                    id: tag_data.struct_id.unwrap(),
                     value,
                 }
             }
-            _ => ValueArray::Base(ValueVec::read(reader, &tag.type_, size, count)?),
+            _ => ValueArray::Base(ValueVec::read(reader, &tag_data.type_, size, count)?),
         })
     }
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
