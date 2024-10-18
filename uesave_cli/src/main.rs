@@ -61,6 +61,10 @@ struct ActionTestResave {
     #[arg(short, long)]
     debug: bool,
 
+    /// Trace and generate trace.json file
+    #[arg(long)]
+    trace: bool,
+
     /// Save files do not contain enough context to parse structs inside MapProperty or SetProperty.
     /// uesave will attempt to guess, but if it is incorrect the save will fail to parse and the
     /// type must be manually specified.
@@ -136,10 +140,14 @@ pub fn main() -> Result<()> {
             let mut input = std::io::Cursor::new(fs::read(path)?);
             let mut output = std::io::Cursor::new(vec![]);
 
-            ser_hex::read("trace.json", &mut input, |reader| {
-                Save::read_with_types(reader, &types)
-            })?
-            .write(&mut output)?;
+            if action.trace {
+                ser_hex::read("trace.json", &mut input, |reader| {
+                    Save::read_with_types(reader, &types)
+                })?
+                .write(&mut output)?;
+            } else {
+                Save::read_with_types(&mut input, &types)?.write(&mut output)?;
+            }
 
             let (input, output) = (input.into_inner(), output.into_inner());
             if input != output {
