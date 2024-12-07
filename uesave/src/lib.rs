@@ -70,10 +70,7 @@ impl<R: Read> Seek for SeekReader<R> {
 }
 impl<R: Read> Read for SeekReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.reader.read(buf).map(|s| {
-            self.read_bytes += s;
-            s
-        })
+        self.reader.read(buf).inspect(|s| self.read_bytes += s)
     }
 }
 
