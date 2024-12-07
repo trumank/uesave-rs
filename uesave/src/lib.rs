@@ -614,6 +614,7 @@ pub enum StructType {
     Color,
     SoftObjectPath,
     GameplayTagContainer,
+    UniqueNetIdRepl,
     Struct(Option<String>),
 }
 impl From<&str> for StructType {
@@ -633,6 +634,7 @@ impl From<&str> for StructType {
             "Color" => StructType::Color,
             "SoftObjectPath" => StructType::SoftObjectPath,
             "GameplayTagContainer" => StructType::GameplayTagContainer,
+            "UniqueNetIdRepl" => StructType::UniqueNetIdRepl,
             "Struct" => StructType::Struct(None),
             _ => StructType::Struct(Some(t.to_owned())),
         }
@@ -655,6 +657,7 @@ impl From<String> for StructType {
             "Color" => StructType::Color,
             "SoftObjectPath" => StructType::SoftObjectPath,
             "GameplayTagContainer" => StructType::GameplayTagContainer,
+            "UniqueNetIdRepl" => StructType::UniqueNetIdRepl,
             "Struct" => StructType::Struct(None),
             _ => StructType::Struct(Some(t)),
         }
@@ -682,6 +685,7 @@ impl StructType {
                 StructType::Color => "Color",
                 StructType::SoftObjectPath => "SoftObjectPath",
                 StructType::GameplayTagContainer => "GameplayTagContainer",
+                StructType::UniqueNetIdRepl => "UniqueNetIdRepl",
                 StructType::Struct(Some(t)) => t,
                 _ => unreachable!(),
             },
@@ -1169,6 +1173,27 @@ impl GameplayTagContainer {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct UniqueNetIdRepl {
+    pub size: u32,
+}
+impl UniqueNetIdRepl {
+    fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
+        let size = reader.read_u32::<LE>()?;
+        if size > 0 {
+            Err(Error::Other(
+                "unimplemented: UniqueNetIdRepl.Size > 0".to_string(),
+            ))
+        } else {
+            Ok(Self { size })
+        }
+    }
+    fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
+        writer.write_u32::<LE>(self.size)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct FFormatArgumentData {
     name: String,
     value: FFormatArgumentDataValue,
@@ -1550,6 +1575,7 @@ pub enum StructValue {
     Rotator(Rotator),
     SoftObjectPath(SoftObjectPath),
     GameplayTagContainer(GameplayTagContainer),
+    UniqueNetIdRepl(UniqueNetIdRepl),
     /// User defined struct which is simply a list of properties
     Struct(Properties),
 }
@@ -1677,6 +1703,9 @@ impl StructValue {
             StructType::GameplayTagContainer => {
                 StructValue::GameplayTagContainer(GameplayTagContainer::read(reader)?)
             }
+            StructType::UniqueNetIdRepl => {
+                StructValue::UniqueNetIdRepl(UniqueNetIdRepl::read(reader)?)
+            }
 
             StructType::Struct(_) => StructValue::Struct(read_properties_until_none(reader)?),
         })
@@ -1697,6 +1726,7 @@ impl StructValue {
             StructValue::Rotator(v) => v.write(writer)?,
             StructValue::SoftObjectPath(v) => v.write(writer)?,
             StructValue::GameplayTagContainer(v) => v.write(writer)?,
+            StructValue::UniqueNetIdRepl(v) => v.write(writer)?,
             StructValue::Struct(v) => write_properties_none_terminated(writer, v)?,
         }
         Ok(())
