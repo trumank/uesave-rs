@@ -1174,21 +1174,37 @@ impl GameplayTagContainer {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct UniqueNetIdRepl {
-    pub size: u32,
+    pub inner: Option<UniqueNetIdReplInner>,
+}
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct UniqueNetIdReplInner {
+    pub size: std::num::NonZeroU32,
+    pub type_: String,
+    pub contents: String,
 }
 impl UniqueNetIdRepl {
     fn read<R: Read + Seek>(reader: &mut Context<R>) -> TResult<Self> {
         let size = reader.read_u32::<LE>()?;
-        if size > 0 {
-            Err(Error::Other(
-                "unimplemented: UniqueNetIdRepl.Size > 0".to_string(),
-            ))
+        let inner = if let Ok(size) = size.try_into() {
+            Some(UniqueNetIdReplInner {
+                size,
+                type_: read_string(reader)?,
+                contents: read_string(reader)?,
+            })
         } else {
-            Ok(Self { size })
-        }
+            None
+        };
+        Ok(Self { inner })
     }
     fn write<W: Write>(&self, writer: &mut Context<W>) -> TResult<()> {
-        writer.write_u32::<LE>(self.size)?;
+        match &self.inner {
+            Some(inner) => {
+                writer.write_u32::<LE>(inner.size.into())?;
+                write_string(writer, &inner.type_)?;
+                write_string(writer, &inner.contents)?;
+            }
+            None => writer.write_u32::<LE>(0)?,
+        }
         Ok(())
     }
 }
