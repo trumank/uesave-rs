@@ -195,7 +195,7 @@ impl From<&str> for PropertyKey {
 }
 
 struct PropertyKeyVisitor;
-impl<'de> Visitor<'de> for PropertyKeyVisitor {
+impl Visitor<'_> for PropertyKeyVisitor {
     type Value = PropertyKey;
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter.write_str(
@@ -374,7 +374,7 @@ enum Scope<'p, 'n> {
     },
 }
 
-impl<'p, 'n> Scope<'p, 'n> {
+impl Scope<'_, '_> {
     fn path(&self) -> String {
         match self {
             Self::Root => "".into(),
@@ -411,7 +411,7 @@ impl<W: Write> Write for Context<'_, '_, '_, '_, W> {
     }
 }
 
-impl<'stream, 'header, 'types, 'scope, S> Context<'stream, 'header, 'types, 'scope, S> {
+impl<'stream, 'types, 'scope, S> Context<'stream, '_, 'types, 'scope, S> {
     fn run<F, T>(stream: &'stream mut S, f: F) -> T
     where
         F: FnOnce(&mut Context<'stream, '_, '_, 'scope, S>) -> T,
@@ -477,9 +477,7 @@ impl<'stream, 'header, 'types, 'scope, S> Context<'stream, 'header, 'types, 'sco
         self.types.types.get(&self.path())
     }
 }
-impl<'stream, 'header, 'types, 'scope, R: Read + Seek>
-    Context<'stream, 'header, 'types, 'scope, R>
-{
+impl<'types, R: Read + Seek> Context<'_, '_, 'types, '_, R> {
     fn get_type_or<'t>(&mut self, t: &'t StructType) -> TResult<&'t StructType>
     where
         'types: 't,
