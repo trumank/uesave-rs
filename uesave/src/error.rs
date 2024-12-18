@@ -10,6 +10,8 @@ pub enum Error {
     UnknownVecType(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("failed to parse UUID {0}")]
+    Uuid(#[from] uuid::Error),
     #[error("{0}")]
     Other(String),
 }
