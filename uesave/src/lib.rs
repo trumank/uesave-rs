@@ -2965,7 +2965,7 @@ impl<R: Read + Seek> Readable<R> for Header {
         let engine_version_patch = reader.read_u16::<LE>()?;
         let engine_version_build = reader.read_u32::<LE>()?;
         let engine_version = read_string(reader)?;
-        let custom_version = if save_game_version >= 1 && save_game_version != 34 {
+        let custom_version = if (engine_version_major, engine_version_minor) >= (4, 12) {
             Some((
                 reader.read_u32::<LE>()?,
                 read_array(reader.read_u32::<LE>()?, reader, CustomFormatData::read)?,
