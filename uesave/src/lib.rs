@@ -782,11 +782,9 @@ impl PropertyTagFull<'_> {
                 let type_ = PropertyType::read(reader)?;
                 let size = reader.read_u32::<LE>()?;
                 let index = reader.read_u32::<LE>()?;
-                let id;
                 let data = match type_ {
                     PropertyType::BoolProperty => {
                         let value = reader.read_u8()? > 0;
-                        id = read_optional_uuid(reader)?;
                         PropertyTagDataFull::Bool(value)
                     }
                     PropertyType::IntProperty
@@ -809,22 +807,18 @@ impl PropertyTagFull<'_> {
                     | PropertyType::MulticastDelegateProperty
                     | PropertyType::MulticastInlineDelegateProperty
                     | PropertyType::MulticastSparseDelegateProperty => {
-                        id = read_optional_uuid(reader)?;
                         PropertyTagDataFull::Other(type_)
                     }
                     PropertyType::ByteProperty => {
                         let enum_type = read_string(reader)?;
-                        id = read_optional_uuid(reader)?;
                         PropertyTagDataFull::Byte((enum_type != "None").then_some(enum_type))
                     }
                     PropertyType::EnumProperty => {
                         let enum_type = read_string(reader)?;
-                        id = read_optional_uuid(reader)?;
                         PropertyTagDataFull::Enum(enum_type, None)
                     }
                     PropertyType::ArrayProperty => {
                         let inner_type = PropertyType::read(reader)?;
-                        id = read_optional_uuid(reader)?;
 
                         PropertyTagDataFull::Array(std::boxed::Box::new(
                             PropertyTagDataFull::from_type(inner_type, None),
@@ -838,7 +832,6 @@ impl PropertyTagFull<'_> {
                             }
                             _ => None,
                         };
-                        id = read_optional_uuid(reader)?;
 
                         let key_type =
                             PropertyTagDataFull::from_type(key_type, key_struct_type.clone())
@@ -865,7 +858,6 @@ impl PropertyTagFull<'_> {
                             ),
                             _ => None,
                         };
-                        id = read_optional_uuid(reader)?;
 
                         let key_type =
                             PropertyTagDataFull::from_type(key_type, key_struct_type.clone())
@@ -882,12 +874,16 @@ impl PropertyTagFull<'_> {
                     PropertyType::StructProperty => {
                         let struct_type = StructType::read(reader)?;
                         let struct_id = uuid::Uuid::read(reader)?;
-                        id = read_optional_uuid(reader)?;
                         PropertyTagDataFull::Struct {
                             struct_type,
                             id: struct_id,
                         }
                     }
+                };
+                let id = if reader.unwrap_header().property_guid() {
+                    read_optional_uuid(reader)?
+                } else {
+                    None
                 };
                 Ok(Some(Self {
                     name: name.into(),
@@ -1024,7 +1020,9 @@ impl PropertyTagFull<'_> {
                 }
                 PropertyTagDataFull::Other(_) => {}
             }
-            write_optional_uuid(writer, self.id)?;
+            if writer.unwrap_header().property_guid() {
+                write_optional_uuid(writer, self.id)?;
+            }
         }
         Ok(())
     }
@@ -2514,14 +2512,20 @@ impl ValueArray {
         Ok(match tag {
             PropertyTagDataFull::Struct { struct_type, id } => {
                 let (struct_type, id) = if !reader.unwrap_header().property_tag() {
-                    let tag = PropertyTagFull::read(reader)?.unwrap();
-                    match tag.data {
-                        PropertyTagDataFull::Struct { struct_type, id } => (struct_type, id),
-                        _ => {
-                            return Err(Error::Other(format!(
-                                "expected StructProperty tag, found {tag:?}"
-                            )))
+                    if reader.unwrap_header().array_inner_tag() {
+                        let tag = PropertyTagFull::read(reader)?.unwrap();
+                        match tag.data {
+                            PropertyTagDataFull::Struct { struct_type, id } => (struct_type, id),
+                            _ => {
+                                return Err(Error::Other(format!(
+                                    "expected StructProperty tag, found {tag:?}"
+                                )))
+                            }
                         }
+                    } else {
+                        // TODO prior to 4.12 struct type is unknown so should be able to
+                        // manually specify like Sets/Maps
+                        (StructType::Struct(None), Default::default())
                     }
                 } else {
                     (struct_type, id)
@@ -2556,7 +2560,9 @@ impl ValueArray {
                     writer.stream(&mut buf, |writer| v.write(writer))?;
                 }
 
-                if !writer.unwrap_header().property_tag() {
+                if !writer.unwrap_header().property_tag()
+                    && writer.unwrap_header().array_inner_tag()
+                {
                     write_string(writer, &tag.name)?;
                     type_.write(writer)?;
                     writer.write_u32::<LE>(buf.len() as u32)?;
@@ -2917,15 +2923,24 @@ pub struct Header {
     pub engine_version_patch: u16,
     pub engine_version_build: u32,
     pub engine_version: String,
-    pub custom_format_version: u32,
-    pub custom_format: Vec<CustomFormatData>,
+    pub custom_version: Option<(u32, Vec<CustomFormatData>)>,
 }
 impl Header {
     fn large_world_coordinates(&self) -> bool {
         self.engine_version_major >= 5
     }
     fn property_tag(&self) -> bool {
-        self.engine_version_major >= 5 && self.engine_version_minor >= 4
+        // PROPERTY_TAG_COMPLETE_TYPE_NAME
+        (self.engine_version_major, self.engine_version_minor) >= (5, 4)
+    }
+    fn property_guid(&self) -> bool {
+        (self.engine_version_major, self.engine_version_minor) >= (4, 12)
+        // TODO really should check object version but would break a lot of saves with mangled headers
+        // self.package_version.ue4 >= 503 // VER_UE4_PROPERTY_GUID_IN_PROPERTY_TAG
+    }
+    fn array_inner_tag(&self) -> bool {
+        // VAR_UE4_ARRAY_PROPERTY_INNER_TAGS
+        (self.engine_version_major, self.engine_version_minor) >= (4, 12)
     }
 }
 impl<R: Read + Seek> Readable<R> for Header {
@@ -2941,21 +2956,33 @@ impl<R: Read + Seek> Readable<R> for Header {
         let save_game_version = reader.read_u32::<LE>()?;
         let package_version = PackageVersion {
             ue4: reader.read_u32::<LE>()?,
-            ue5: (save_game_version >= 3)
+            ue5: (save_game_version >= 3 && save_game_version != 34) // TODO 34 is probably a game specific version
                 .then(|| reader.read_u32::<LE>())
                 .transpose()?,
+        };
+        let engine_version_major = reader.read_u16::<LE>()?;
+        let engine_version_minor = reader.read_u16::<LE>()?;
+        let engine_version_patch = reader.read_u16::<LE>()?;
+        let engine_version_build = reader.read_u32::<LE>()?;
+        let engine_version = read_string(reader)?;
+        let custom_version = if save_game_version >= 1 && save_game_version != 34 {
+            Some((
+                reader.read_u32::<LE>()?,
+                read_array(reader.read_u32::<LE>()?, reader, CustomFormatData::read)?,
+            ))
+        } else {
+            None
         };
         Ok(Header {
             magic,
             save_game_version,
             package_version,
-            engine_version_major: reader.read_u16::<LE>()?,
-            engine_version_minor: reader.read_u16::<LE>()?,
-            engine_version_patch: reader.read_u16::<LE>()?,
-            engine_version_build: reader.read_u32::<LE>()?,
-            engine_version: read_string(reader)?,
-            custom_format_version: reader.read_u32::<LE>()?,
-            custom_format: read_array(reader.read_u32::<LE>()?, reader, CustomFormatData::read)?,
+            engine_version_major,
+            engine_version_minor,
+            engine_version_patch,
+            engine_version_build,
+            engine_version,
+            custom_version,
         })
     }
 }
@@ -2972,10 +2999,12 @@ impl<W: Write> Writable<W> for Header {
         writer.write_u16::<LE>(self.engine_version_patch)?;
         writer.write_u32::<LE>(self.engine_version_build)?;
         write_string(writer, &self.engine_version)?;
-        writer.write_u32::<LE>(self.custom_format_version)?;
-        writer.write_u32::<LE>(self.custom_format.len() as u32)?;
-        for cf in &self.custom_format {
-            cf.write(writer)?;
+        if let Some((custom_format_version, custom_format)) = &self.custom_version {
+            writer.write_u32::<LE>(*custom_format_version)?;
+            writer.write_u32::<LE>(custom_format.len() as u32)?;
+            for cf in custom_format {
+                cf.write(writer)?;
+            }
         }
         Ok(())
     }
