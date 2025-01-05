@@ -28,3 +28,6 @@ shell-words = "1.1.0"
 tempfile = "3.9.0"
 edit = "0.1.5"
 ser-hex = { git = "https://github.com/trumank/ser-hex.git", version = "0.1.0" }
+
+[package.metadata.release]
+release = false
