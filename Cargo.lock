@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "uesave"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bitflags 2.6.0",
  "byteorder",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "uesave_cli"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "clap",
