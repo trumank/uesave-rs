@@ -410,6 +410,7 @@ struct ContextState<'version, 'types, 'scope, V> {
     version: &'version V,
     types: &'types Types,
     scope: &'scope Scope<'scope, 'scope>,
+    log: bool,
 }
 impl<R: Read, V> Read for Context<'_, '_, '_, '_, R, V> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -430,7 +431,7 @@ impl<W: Write, V> Write for Context<'_, '_, '_, '_, W, V> {
     }
 }
 
-impl<'stream, 'types, 'scope, S> Context<'stream, '_, 'types, 'scope, S, ()> {
+impl<'stream, 'scope, S> Context<'stream, '_, '_, 'scope, S, ()> {
     fn run<F, T>(stream: &'stream mut S, f: F) -> T
     where
         F: FnOnce(&mut Context<'stream, '_, '_, 'scope, S, ()>) -> T,
@@ -441,19 +442,7 @@ impl<'stream, 'types, 'scope, S> Context<'stream, '_, 'types, 'scope, S, ()> {
                 version: &(),
                 types: &Types::new(),
                 scope: &Scope::Root,
-            },
-        })
-    }
-    fn run_with_types<F, T>(types: &'types Types, stream: &'stream mut S, f: F) -> T
-    where
-        F: FnOnce(&mut Context<'stream, '_, 'types, 'scope, S, ()>) -> T,
-    {
-        f(&mut Context::<'stream, '_, 'types, 'scope> {
-            stream,
-            state: ContextState {
-                version: &(),
-                types,
-                scope: &Scope::Root,
+                log: false,
             },
         })
     }
@@ -466,12 +455,11 @@ impl<'types, S, V> Context<'_, '_, 'types, '_, S, V> {
         f(&mut Context {
             stream: self.stream,
             state: ContextState {
-                version: self.state.version,
-                types: self.state.types,
                 scope: &Scope::Node {
                     name,
                     parent: self.state.scope,
                 },
+                ..self.state
             },
         })
     }
@@ -485,6 +473,7 @@ impl<'types, S, V> Context<'_, '_, 'types, '_, S, V> {
                 version,
                 types: self.state.types,
                 scope: self.state.scope,
+                log: self.state.log,
             },
         })
     }
@@ -494,11 +483,7 @@ impl<'types, S, V> Context<'_, '_, 'types, '_, S, V> {
     {
         f(&mut Context {
             stream,
-            state: ContextState {
-                version: self.state.version,
-                types: self.state.types,
-                scope: self.state.scope,
-            },
+            state: ContextState { ..self.state },
         })
     }
     fn path(&self) -> String {
@@ -510,6 +495,9 @@ impl<'types, S, V> Context<'_, '_, 'types, '_, S, V> {
     fn version(&self) -> &V {
         self.state.version
     }
+    fn log(&self) -> bool {
+        self.state.log
+    }
 }
 impl<'types, R: Read + Seek, V> Context<'_, '_, 'types, '_, R, V> {
     fn get_type_or<'t>(&mut self, t: &'t StructType) -> TResult<&'t StructType>
@@ -518,12 +506,14 @@ impl<'types, R: Read + Seek, V> Context<'_, '_, 'types, '_, R, V> {
     {
         let offset = self.stream.stream_position()?;
         Ok(self.get_type().unwrap_or_else(|| {
-            eprintln!(
-                "offset {}: StructType for \"{}\" unspecified, assuming {:?}",
-                offset,
-                self.path(),
-                t
-            );
+            if self.log() {
+                eprintln!(
+                    "offset {}: StructType for \"{}\" unspecified, assuming {:?}",
+                    offset,
+                    self.path(),
+                    t
+                );
+            }
             t
         }))
     }
@@ -2986,7 +2976,7 @@ impl VersionInfo for Header {
 impl<R: Read + Seek, V> Readable<R, V> for Header {
     fn read(reader: &mut Context<R, V>) -> TResult<Self> {
         let magic = reader.read_u32::<LE>()?;
-        if magic != u32::from_le_bytes(*b"GVAS") {
+        if reader.log() && magic != u32::from_le_bytes(*b"GVAS") {
             eprintln!(
                 "Found non-standard magic: {:02x?} ({}) expected: GVAS, continuing to parse...",
                 &magic.to_le_bytes(),
@@ -3091,36 +3081,7 @@ impl Save {
     }
     /// Reads save from the given reader using the provided [`Types`]
     pub fn read_with_types<R: Read>(reader: &mut R, types: &Types) -> Result<Self, ParseError> {
-        let mut reader = SeekReader::new(reader);
-
-        Context::run_with_types(types, &mut reader, |reader| {
-            let header = Header::read(reader)?;
-            let (root, extra) = reader.with_version(&header, |reader| -> TResult<_> {
-                let root = Root::read(reader)?;
-                let extra = {
-                    let mut buf = vec![];
-                    reader.read_to_end(&mut buf)?;
-                    if buf != [0; 4] {
-                        eprintln!(
-                            "{} extra bytes. Save may not have been parsed completely.",
-                            buf.len()
-                        );
-                    }
-                    buf
-                };
-                Ok((root, extra))
-            })?;
-
-            Ok(Self {
-                header,
-                root,
-                extra,
-            })
-        })
-        .map_err(|e| error::ParseError {
-            offset: reader.stream_position().unwrap() as usize, // our own implemenation which cannot fail
-            error: e,
-        })
+        SaveReader::new().types(types).read(reader)
     }
     pub fn write<W: Write>(&self, writer: &mut W) -> TResult<()> {
         Context::run(writer, |writer| {
@@ -3130,6 +3091,75 @@ impl Save {
                 writer.write_all(&self.extra)?;
                 Ok(())
             })
+        })
+    }
+}
+
+pub struct SaveReader<'types> {
+    log: bool,
+    types: Option<&'types Types>,
+}
+impl Default for SaveReader<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl<'types> SaveReader<'types> {
+    pub fn new() -> Self {
+        Self {
+            log: false,
+            types: None,
+        }
+    }
+    pub fn log(mut self, log: bool) -> Self {
+        self.log = log;
+        self
+    }
+    pub fn types(mut self, types: &'types Types) -> Self {
+        self.types = Some(types);
+        self
+    }
+    pub fn read<S: Read>(self, stream: S) -> Result<Save, ParseError> {
+        let tmp = Types::new();
+        let types = self.types.unwrap_or(&tmp);
+
+        let mut stream = SeekReader::new(stream);
+        let mut reader = Context {
+            stream: &mut stream,
+            state: ContextState {
+                version: &(),
+                types,
+                scope: &Scope::Root,
+                log: self.log,
+            },
+        };
+
+        || -> TResult<Save> {
+            let header = Header::read(&mut reader)?;
+            let (root, extra) = reader.with_version(&header, |reader| -> TResult<_> {
+                let root = Root::read(reader)?;
+                let extra = {
+                    let mut buf = vec![];
+                    reader.read_to_end(&mut buf)?;
+                    if reader.log() && buf != [0; 4] {
+                        eprintln!(
+                            "{} extra bytes. Save may not have been parsed completely.",
+                            buf.len()
+                        );
+                    }
+                    buf
+                };
+                Ok((root, extra))
+            })?;
+            Ok(Save {
+                header,
+                root,
+                extra,
+            })
+        }()
+        .map_err(|e| error::ParseError {
+            offset: reader.stream_position().unwrap() as usize, // our own implemenation which cannot fail
+            error: e,
         })
     }
 }

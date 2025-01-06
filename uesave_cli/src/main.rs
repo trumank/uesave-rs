@@ -4,7 +4,7 @@ use std::io::{stdin, stdout, BufRead, BufReader, BufWriter, Cursor, Write};
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 
-use uesave::{Save, StructType, Types};
+use uesave::{Save, SaveReader, StructType, Types};
 
 #[derive(Parser, Debug)]
 struct ActionToJson {
@@ -13,6 +13,10 @@ struct ActionToJson {
 
     #[arg(short, long, default_value = "-")]
     output: String,
+
+    /// Silence any parse warnings
+    #[arg(long)]
+    no_warn: bool,
 
     /// Save files do not contain enough context to parse structs inside MapProperty or SetProperty.
     /// uesave will attempt to guess, but if it is incorrect the save will fail to parse and the
@@ -40,6 +44,10 @@ struct ActionEdit {
     #[arg(required = true, index = 1)]
     path: String,
 
+    /// Silence any parse warnings
+    #[arg(long)]
+    no_warn: bool,
+
     /// Save files do not contain enough context to parse structs inside MapProperty or SetProperty.
     /// uesave will attempt to guess, but if it is incorrect the save will fail to parse and the
     /// type must be manually specified.
@@ -60,6 +68,10 @@ struct ActionTestResave {
     /// If resave fails, write input.sav and output.sav to working directory for debugging
     #[arg(short, long)]
     debug: bool,
+
+    /// Silence any parse warnings
+    #[arg(long)]
+    no_warn: bool,
 
     /// Save files do not contain enough context to parse structs inside MapProperty or SetProperty.
     /// uesave will attempt to guess, but if it is incorrect the save will fail to parse and the
@@ -110,7 +122,10 @@ pub fn main() -> Result<()> {
                 types.add(path, t);
             }
 
-            let save = Save::read_with_types(&mut input(&action.input)?, &types)?;
+            let save = SaveReader::new()
+                .log(!action.no_warn)
+                .types(&types)
+                .read(input(&action.input)?)?;
             serde_json::to_writer_pretty(output(&action.output)?, &save)?;
         }
         Action::FromJson(io) => {
@@ -135,7 +150,11 @@ pub fn main() -> Result<()> {
 
             let mut input = std::io::Cursor::new(fs::read(path)?);
             let mut output = std::io::Cursor::new(vec![]);
-            Save::read_with_types(&mut input, &types)?.write(&mut output)?;
+            SaveReader::new()
+                .log(!action.no_warn)
+                .types(&types)
+                .read(&mut input)?
+                .write(&mut output)?;
             let (input, output) = (input.into_inner(), output.into_inner());
             if input != output {
                 if action.debug {
@@ -152,7 +171,10 @@ pub fn main() -> Result<()> {
                 types.add(path, t);
             }
 
-            let save = Save::read_with_types(&mut Cursor::new(fs::read(&action.path)?), &types)?;
+            let save = SaveReader::new()
+                .log(!action.no_warn)
+                .types(&types)
+                .read(Cursor::new(fs::read(&action.path)?))?;
             let modified_save: Save = serde_json::from_slice(&edit::edit_bytes_with_builder(
                 serde_json::to_vec_pretty(&save)?,
                 tempfile::Builder::new().suffix(".json"),
