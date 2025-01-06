@@ -4,6 +4,33 @@ use pretty_assertions::assert_eq;
 use std::io::Cursor;
 
 const SAVE: &[u8] = include_bytes!("../drg-save-test.sav");
+
+struct MockVersionInfo;
+impl VersionInfo for MockVersionInfo {
+    fn large_world_coordinates(&self) -> bool {
+        false
+    }
+    fn property_tag(&self) -> bool {
+        false
+    }
+    fn property_guid(&self) -> bool {
+        true
+    }
+    fn array_inner_tag(&self) -> bool {
+        true
+    }
+    fn remove_asset_path_fnames(&self) -> bool {
+        false
+    }
+}
+
+fn run<S, R, F>(s: &mut S, f: F) -> TResult<R>
+where
+    F: FnOnce(&mut Context<S, MockVersionInfo>) -> TResult<R>,
+{
+    Context::run(s, |s| s.with_version(&MockVersionInfo, f))
+}
+
 #[test]
 fn test_header() -> TResult<()> {
     let original = [
@@ -79,9 +106,9 @@ fn test_header() -> TResult<()> {
         0x00, 0x00,
     ];
     let mut reader = Cursor::new(&original);
-    let header = Context::run(&mut reader, |reader| Header::read(reader))?;
+    let header = run(&mut reader, |reader| Header::read(reader))?;
     let mut reconstructed = vec![];
-    Context::run(&mut reconstructed, |writer| header.write(writer))?;
+    run(&mut reconstructed, |writer| header.write(writer))?;
     assert_eq!(original, &reconstructed[..]);
     Ok(())
 }
@@ -90,9 +117,9 @@ fn test_header() -> TResult<()> {
 fn test_uuid() -> TResult<()> {
     let id = uuid::uuid!("2eb5fdbd4d1001ac8ff33681daa59333");
     let mut writer = vec![];
-    Context::run(&mut writer, |writer| id.write(writer))?;
+    run(&mut writer, |writer| id.write(writer))?;
     let mut reader = Cursor::new(&writer);
-    let rid = Context::run(&mut reader, |reader| uuid::Uuid::read(reader))?;
+    let rid = run(&mut reader, |reader| uuid::Uuid::read(reader))?;
     assert_eq!(id, rid);
     Ok(())
 }
@@ -101,7 +128,7 @@ fn test_uuid() -> TResult<()> {
 fn test_uuid2() -> TResult<()> {
     let id = uuid::uuid!("85b20ca1-49fb-7138-a154-c89a2c20e2cd");
     let mut writer = vec![];
-    Context::run(&mut writer, |writer| id.write(writer))?;
+    run(&mut writer, |writer| id.write(writer))?;
     assert_eq!(
         writer,
         [
@@ -123,48 +150,6 @@ fn test_rw_save1() -> TResult<()> {
 }
 
 #[test]
-fn test_rw_property_meta() -> TResult<()> {
-    let original = [
-        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
-    ];
-    let mut reader = Cursor::new(&original);
-    let obj = Context::run(&mut reader, |reader| {
-        Property::read(reader, PropertyType::IntProperty, 0)
-    })?;
-    let mut reconstructed: Vec<u8> = vec![];
-    Context::run(&mut reconstructed, |writer| obj.write(writer))?;
-    assert_eq!(original, &reconstructed[..]);
-    assert_eq!(
-        obj,
-        Property {
-            id: Some(uuid::uuid!("00000000000000000000000000000000")),
-            inner: PropertyInner::Int(10),
-        }
-    );
-    Ok(())
-}
-
-#[test]
-fn test_rw_property_meta_str() -> TResult<()> {
-    let original = [
-        0x00, 0x32, 0x00, 0x00, 0x00, 0x32, 0x33, 0x37, 0x30, 0x32, 0x34, 0x32, 0x34, 0x31, 0x31,
-        0x32, 0x37, 0x39, 0x31, 0x34, 0x35, 0x39, 0x30, 0x31, 0x31, 0x38, 0x31, 0x36, 0x37, 0x31,
-        0x34, 0x32, 0x32, 0x34, 0x39, 0x34, 0x33, 0x31, 0x31, 0x32, 0x35, 0x32, 0x35, 0x33, 0x31,
-        0x34, 0x30, 0x34, 0x30, 0x39, 0x35, 0x32, 0x30, 0x35, 0x00,
-    ];
-    let mut reader = Cursor::new(&original);
-    let obj = Context::run(&mut reader, |reader| {
-        Property::read(reader, PropertyType::StrProperty, 0)
-    })?;
-    println!("{obj:#?}");
-    let mut reconstructed: Vec<u8> = vec![];
-    Context::run(&mut reconstructed, |writer| obj.write(writer))?;
-    assert_eq!(original, &reconstructed[..]);
-    Ok(())
-}
-
-#[test]
 fn test_read_int_property() -> TResult<()> {
     let bytes = [
         0x0E, 0x00, 0x00, 0x00, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6F, 0x6E, 0x4E, 0x75, 0x6D, 0x62,
@@ -174,12 +159,15 @@ fn test_read_int_property() -> TResult<()> {
     ];
     let mut reader = Cursor::new(bytes);
     assert_eq!(
-        Context::run(&mut reader, read_property)?,
+        run(&mut reader, read_property)?,
         Some((
             "VersionNumber".into(),
             Property {
-                id: None,
-                inner: PropertyInner::Int(2)
+                inner: PropertyInner::Int(2),
+                tag: PropertyTagPartial {
+                    id: None,
+                    data: PropertyTagDataPartial::Other(PropertyType::IntProperty)
+                }
             }
         ))
     );
@@ -208,38 +196,51 @@ fn test_read_struct_property() -> TResult<()> {
     ];
     let mut reader = Cursor::new(bytes);
     assert_eq!(
-        Context::run(&mut reader, read_property)?,
+        run(&mut reader, read_property)?,
         Some((
             "VanityMasterySave".into(),
             Property {
-                id: None,
-                inner: PropertyInner::Struct {
-                    value: StructValue::Struct(Properties(indexmap::IndexMap::from([
+                tag: PropertyTagPartial {
+                    id: None,
+                    data: PropertyTagDataPartial::Struct {
+                        struct_type: StructType::Struct(Some("VanityMasterySave".to_string())),
+                        id: uuid::uuid!("00000000000000000000000000000000"),
+                    }
+                },
+                inner: PropertyInner::Struct(StructValue::Struct(Properties(
+                    indexmap::IndexMap::from([
                         (
                             "Level".into(),
                             Property {
-                                id: None,
-                                inner: PropertyInner::Int(140)
+                                inner: PropertyInner::Int(140),
+                                tag: PropertyTagPartial {
+                                    id: None,
+                                    data: PropertyTagDataPartial::Other(PropertyType::IntProperty)
+                                }
                             }
                         ),
                         (
                             "XP".into(),
                             Property {
-                                id: None,
-                                inner: PropertyInner::Int(9018)
+                                inner: PropertyInner::Int(9018),
+                                tag: PropertyTagPartial {
+                                    id: None,
+                                    data: PropertyTagDataPartial::Other(PropertyType::IntProperty)
+                                }
                             },
                         ),
                         (
                             "HasAwardedForOldPurchases".into(),
                             Property {
-                                id: None,
-                                inner: PropertyInner::Bool(true)
+                                inner: PropertyInner::Bool(true),
+                                tag: PropertyTagPartial {
+                                    id: None,
+                                    data: PropertyTagDataPartial::Other(PropertyType::BoolProperty)
+                                }
                             },
                         ),
-                    ]))),
-                    struct_type: StructType::Struct(Some("VanityMasterySave".to_string())),
-                    struct_id: uuid::uuid!("00000000000000000000000000000000"),
-                }
+                    ])
+                )),)
             }
         ))
     );
@@ -257,14 +258,16 @@ fn test_read_array_property() -> TResult<()> {
     ];
     let mut reader = Cursor::new(bytes);
     assert_eq!(
-        Context::run(&mut reader, read_property)?,
+        run(&mut reader, read_property)?,
         Some((
             "StatIndices".into(),
             Property {
-                id: None,
-                inner: PropertyInner::Array {
-                    array_type: PropertyType::IntProperty,
-                    value: ValueArray::Base(ValueVec::Int(vec![0]))
+                inner: PropertyInner::Array(ValueArray::Base(ValueVec::Int(vec![0]))),
+                tag: PropertyTagPartial {
+                    id: None,
+                    data: PropertyTagDataPartial::Array(
+                        PropertyTagDataPartial::Other(PropertyType::IntProperty).into()
+                    )
                 }
             }
         ))
@@ -274,11 +277,11 @@ fn test_read_array_property() -> TResult<()> {
 
 fn rw_property(original: &[u8]) -> TResult<()> {
     let mut reader = Cursor::new(&original);
-    Context::run(&mut reader, |reader| {
+    run(&mut reader, |reader| {
         let property = read_property(reader)?.unwrap();
         println!("{property:#?}");
         let mut reconstructed: Vec<u8> = vec![];
-        Context::run(&mut reconstructed, |writer| {
+        run(&mut reconstructed, |writer| {
             write_property((&property.0, &property.1), writer)
         })?;
         assert_eq!(original, &reconstructed[..]);
@@ -589,10 +592,10 @@ fn test_rw_header() -> TResult<()> {
         0x01, 0x00, 0x00, 0x00,
     ];
     let mut reader = Cursor::new(&original);
-    Context::run(&mut reader, |reader| {
+    run(&mut reader, |reader| {
         let obj = Header::read(reader)?;
         let mut reconstructed: Vec<u8> = vec![];
-        Context::run(&mut reconstructed, |writer| obj.write(writer))?;
+        run(&mut reconstructed, |writer| obj.write(writer))?;
         assert_eq!(original, &reconstructed[..]);
         Ok(())
     })
