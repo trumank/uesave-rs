@@ -20,7 +20,7 @@ name = "uesave"
 path = "src/main.rs"
 
 [dependencies]
-uesave = { path = "../uesave" }
+uesave = { version = "0.6.1", path = "../uesave" }
 anyhow = "1.0.79"
 clap = { version = "4.4.16", features = ["derive"] }
 serde_json = { version = "1.0.111", features = ["preserve_order"] }
