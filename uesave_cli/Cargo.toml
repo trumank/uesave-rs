@@ -24,10 +24,8 @@ uesave = { path = "../uesave" }
 anyhow = "1.0.79"
 clap = { version = "4.4.16", features = ["derive"] }
 serde_json = { version = "1.0.111", features = ["preserve_order"] }
-shell-words = "1.1.0"
 tempfile = "3.9.0"
 edit = "0.1.5"
-ser-hex = { git = "https://github.com/trumank/ser-hex.git", version = "0.1.0" }
 
 [package.metadata.release]
 release = false
