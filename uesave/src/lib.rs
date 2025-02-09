@@ -3044,26 +3044,42 @@ impl<W: Write, V> Writable<W, V> for Header {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Root {
     pub save_game_type: String,
+    pub flag: u32,
     pub properties: Properties,
 }
 impl Root {
     fn read<R: Read + Seek, V: VersionInfo>(reader: &mut Context<R, V>) -> TResult<Self> {
         let save_game_type = read_string(reader)?;
+
+        let flag = reader.read_u32::<LE>()?;
+        let _size = reader.read_u32::<LE>()?;
+
         if reader.version().property_tag() {
             reader.read_u8()?;
         }
+
         let properties = read_properties_until_none(reader)?;
         Ok(Self {
             save_game_type,
+            flag,
             properties,
         })
     }
     fn write<W: Write, V: VersionInfo>(&self, writer: &mut Context<W, V>) -> TResult<()> {
         write_string(writer, &self.save_game_type)?;
-        if writer.version().property_tag() {
-            writer.write_u8(0)?;
-        }
-        write_properties_none_terminated(writer, &self.properties)?;
+
+        writer.write_u32::<LE>(self.flag)?;
+
+        let mut buf = vec![];
+        writer.with_stream(&mut buf, |writer| {
+            if writer.version().property_tag() {
+                writer.write_u8(0)?;
+            }
+            write_properties_none_terminated(writer, &self.properties)
+        })?;
+
+        writer.write_u32::<LE>(buf.len() as u32 + 4)?;
+        writer.write_all(&buf)?;
         Ok(())
     }
 }
