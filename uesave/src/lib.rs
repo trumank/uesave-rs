@@ -3040,35 +3040,86 @@ impl<W: Write, V> Writable<W, V> for Header {
     }
 }
 
+static AF_FILE_VERIFICATION: &str = "ABF_SAVE_VERSION";
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct AFData {
+    pub flag: Option<u32>,
+    pub variant: AFDataVariant,
+}
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum AFDataVariant {
+    Version { save_version: u32 },
+    None,
+}
+
 /// Root struct inside a save file which holds both the Unreal Engine class name and list of properties
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Root {
     pub save_game_type: String,
-    pub flag: u32,
+    pub af_data: Option<AFData>,
     pub properties: Properties,
 }
 impl Root {
     fn read<R: Read + Seek, V: VersionInfo>(reader: &mut Context<R, V>) -> TResult<Self> {
         let save_game_type = read_string(reader)?;
 
-        let flag = reader.read_u32::<LE>()?;
-        let _size = reader.read_u32::<LE>()?;
+        let af_data = if reader.version().property_tag() {
+            match reader.read_u8()? {
+                0 => None,
+                0x11 => {
+                    reader.read_exact(&mut [0; 3])?;
+                    let mut file_verification = [0; AF_FILE_VERIFICATION.len() + 1];
+                    reader.read_exact(&mut file_verification)?;
+                    assert_eq!(
+                        &file_verification[..AF_FILE_VERIFICATION.len()],
+                        AF_FILE_VERIFICATION.as_bytes()
+                    );
 
-        if reader.version().property_tag() {
-            reader.read_u8()?;
-        }
+                    let save_version = reader.read_u32::<LE>()?;
+                    let flag = Some(reader.read_u32::<LE>()?);
+                    let _size = reader.read_u32::<LE>()?;
+                    let variant = AFDataVariant::Version { save_version };
+
+                    reader.read_u8()?;
+
+                    Some(AFData { flag, variant })
+                }
+                flag => {
+                    let mut bytes = [flag, 0, 0, 0];
+                    reader.read_exact(&mut bytes[1..])?;
+                    let _size = reader.read_u32::<LE>()?;
+
+                    reader.read_u8()?;
+
+                    Some(AFData {
+                        flag: Some(u32::from_le_bytes(bytes)),
+                        variant: AFDataVariant::None,
+                    })
+                }
+            }
+        } else {
+            None
+        };
 
         let properties = read_properties_until_none(reader)?;
         Ok(Self {
             save_game_type,
-            flag,
+            af_data,
             properties,
         })
     }
     fn write<W: Write, V: VersionInfo>(&self, writer: &mut Context<W, V>) -> TResult<()> {
         write_string(writer, &self.save_game_type)?;
 
-        writer.write_u32::<LE>(self.flag)?;
+        if let Some(AFData {
+            variant: AFDataVariant::Version { save_version },
+            ..
+        }) = &self.af_data
+        {
+            write_string(writer, AF_FILE_VERIFICATION)?;
+            writer.write_u32::<LE>(*save_version)?;
+        }
 
         let mut buf = vec![];
         writer.with_stream(&mut buf, |writer| {
@@ -3078,7 +3129,10 @@ impl Root {
             write_properties_none_terminated(writer, &self.properties)
         })?;
 
-        writer.write_u32::<LE>(buf.len() as u32 + 4)?;
+        if let Some(flag) = self.af_data.as_ref().and_then(|d| d.flag) {
+            writer.write_u32::<LE>(flag)?;
+            writer.write_u32::<LE>(buf.len() as u32 + 4)?;
+        }
         writer.write_all(&buf)?;
         Ok(())
     }
