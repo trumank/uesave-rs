@@ -176,9 +176,7 @@ fn write_string_trailing<W: Write, V>(
     trailing: Option<&[u8]>,
 ) -> TResult<()> {
     if string.is_empty() || string.is_ascii() {
-        writer.write_u32::<LE>(
-            (string.as_bytes().len() + trailing.map(|t| t.len()).unwrap_or(1)) as u32,
-        )?;
+        writer.write_u32::<LE>((string.len() + trailing.map(|t| t.len()).unwrap_or(1)) as u32)?;
         writer.write_all(string.as_bytes())?;
         writer.write_all(trailing.unwrap_or(&[0]))?;
     } else {
