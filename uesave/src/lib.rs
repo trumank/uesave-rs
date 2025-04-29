@@ -2147,7 +2147,7 @@ pub enum PropertyValue {
     Enum(Enum),
     Name(String),
     Str(String),
-    SoftObject(String, String),
+    SoftObject(SoftObjectPath),
     SoftObjectPath(SoftObjectPath),
     Object(String),
     Struct(StructValue),
@@ -2243,7 +2243,7 @@ impl PropertyValue {
                 PropertyType::NameProperty => PropertyValue::Name(read_string(reader)?),
                 PropertyType::StrProperty => PropertyValue::Str(read_string(reader)?),
                 PropertyType::SoftObjectProperty => {
-                    PropertyValue::SoftObject(read_string(reader)?, read_string(reader)?)
+                    PropertyValue::SoftObject(SoftObjectPath::read(reader)?)
                 }
                 PropertyType::ObjectProperty => PropertyValue::Object(read_string(reader)?),
                 _ => return Err(Error::Other(format!("unimplemented property {t:?}"))),
@@ -2263,10 +2263,7 @@ impl PropertyValue {
             PropertyValue::Bool(v) => writer.write_u8(u8::from(*v))?,
             PropertyValue::Name(v) => write_string(writer, v)?,
             PropertyValue::Str(v) => write_string(writer, v)?,
-            PropertyValue::SoftObject(a, b) => {
-                write_string(writer, a)?;
-                write_string(writer, b)?;
-            }
+            PropertyValue::SoftObject(v) => v.write(writer)?,
             PropertyValue::SoftObjectPath(v) => v.write(writer)?,
             PropertyValue::Object(v) => write_string(writer, v)?,
             PropertyValue::Byte(v) => match v {
