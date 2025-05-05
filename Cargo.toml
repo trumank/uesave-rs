@@ -3,7 +3,7 @@ resolver = "2"
 members = ["uesave", "uesave_cli"]
 
 [workspace.package]
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 authors = ["trumank"]
 repository = "https://github.com/trumank/uesave-rs"
