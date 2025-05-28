@@ -1289,10 +1289,236 @@ type UInt8 = u8;
 type UInt16 = u16;
 type UInt32 = u32;
 type UInt64 = u64;
-type Float = f32;
-type Double = f64;
 type Bool = bool;
 type Enum = String;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Float(pub f32);
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Double(pub f64);
+
+impl std::fmt::Display for Float {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+impl std::fmt::Display for Double {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+impl From<f32> for Float {
+    fn from(value: f32) -> Self {
+        Self(value)
+    }
+}
+impl From<f64> for Float {
+    fn from(value: f64) -> Self {
+        Self(value as f32)
+    }
+}
+impl From<Float> for f32 {
+    fn from(val: Float) -> Self {
+        val.0
+    }
+}
+impl From<Float> for f64 {
+    fn from(val: Float) -> Self {
+        val.0 as f64
+    }
+}
+impl From<f32> for Double {
+    fn from(value: f32) -> Self {
+        Self(value as f64)
+    }
+}
+impl From<f64> for Double {
+    fn from(value: f64) -> Self {
+        Self(value)
+    }
+}
+impl From<Double> for f32 {
+    fn from(val: Double) -> Self {
+        val.0 as f32
+    }
+}
+impl From<Double> for f64 {
+    fn from(val: Double) -> Self {
+        val.0
+    }
+}
+impl<'de> Deserialize<'de> for Float {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct FloatVisitor;
+
+        impl serde::de::Visitor<'_> for FloatVisitor {
+            type Value = f32;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a float or string representation of NaN/Infinity")
+            }
+            fn visit_i8<E>(self, value: i8) -> Result<Self::Value, E> {
+                Ok(value as f32)
+            }
+            fn visit_u8<E>(self, value: u8) -> Result<Self::Value, E> {
+                Ok(value as f32)
+            }
+            fn visit_i16<E>(self, value: i16) -> Result<Self::Value, E> {
+                Ok(value as f32)
+            }
+            fn visit_u16<E>(self, value: u16) -> Result<Self::Value, E> {
+                Ok(value as f32)
+            }
+            fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E> {
+                Ok(value as f32)
+            }
+            fn visit_u32<E>(self, value: u32) -> Result<Self::Value, E> {
+                Ok(value as f32)
+            }
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(value as f32)
+            }
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(value as f32)
+            }
+            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E> {
+                Ok(value)
+            }
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(value as f32)
+            }
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "NaN" => Ok(f32::NAN),
+                    "-NaN" => Ok(-f32::NAN),
+                    "Infinity" => Ok(f32::INFINITY),
+                    "-Infinity" => Ok(f32::NEG_INFINITY),
+                    _ => Err(E::custom(format!(
+                        "unxpected string value in place of float '{value}'"
+                    ))),
+                }
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_str(&value)
+            }
+        }
+
+        let value = deserializer.deserialize_any(FloatVisitor)?;
+        Ok(Self(value))
+    }
+}
+impl<'de> Deserialize<'de> for Double {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct FloatVisitor;
+
+        impl serde::de::Visitor<'_> for FloatVisitor {
+            type Value = f64;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a float or string representation of NaN/Infinity")
+            }
+            fn visit_i8<E>(self, value: i8) -> Result<Self::Value, E> {
+                Ok(value as f64)
+            }
+            fn visit_u8<E>(self, value: u8) -> Result<Self::Value, E> {
+                Ok(value as f64)
+            }
+            fn visit_i16<E>(self, value: i16) -> Result<Self::Value, E> {
+                Ok(value as f64)
+            }
+            fn visit_u16<E>(self, value: u16) -> Result<Self::Value, E> {
+                Ok(value as f64)
+            }
+            fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E> {
+                Ok(value as f64)
+            }
+            fn visit_u32<E>(self, value: u32) -> Result<Self::Value, E> {
+                Ok(value as f64)
+            }
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(value as f64)
+            }
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(value as f64)
+            }
+            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E> {
+                Ok(value as f64)
+            }
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(value)
+            }
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "NaN" => Ok(f64::NAN),
+                    "-NaN" => Ok(-f64::NAN),
+                    "Infinity" => Ok(f64::INFINITY),
+                    "-Infinity" => Ok(f64::NEG_INFINITY),
+                    _ => Err(E::custom(format!(
+                        "unxpected string value in place of float '{value}'"
+                    ))),
+                }
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_str(&value)
+            }
+        }
+
+        let value = deserializer.deserialize_any(FloatVisitor)?;
+        Ok(Self(value))
+    }
+}
+impl Serialize for Float {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let value = self.0;
+        let sign = if value.is_sign_negative() { "-" } else { "" };
+        if value.is_nan() {
+            serializer.serialize_str(&format!("{sign}NaN"))
+        } else if value.is_infinite() {
+            serializer.serialize_str(&format!("{sign}Infinity"))
+        } else {
+            serializer.serialize_f32(value)
+        }
+    }
+}
+impl Serialize for Double {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let value = self.0;
+        let sign = if value.is_sign_negative() { "-" } else { "" };
+        if value.is_nan() {
+            serializer.serialize_str(&format!("{sign}NaN"))
+        } else if value.is_infinite() {
+            serializer.serialize_str(&format!("{sign}Infinity"))
+        } else {
+            serializer.serialize_f64(value)
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct MapEntry {
@@ -1416,99 +1642,99 @@ impl MulticastSparseDelegate {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct LinearColor {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-    pub a: f32,
+    pub r: Float,
+    pub g: Float,
+    pub b: Float,
+    pub a: Float,
 }
 impl LinearColor {
     fn read<R: Read + Seek, V>(reader: &mut Context<R, V>) -> TResult<Self> {
         Ok(Self {
-            r: reader.read_f32::<LE>()?,
-            g: reader.read_f32::<LE>()?,
-            b: reader.read_f32::<LE>()?,
-            a: reader.read_f32::<LE>()?,
+            r: reader.read_f32::<LE>()?.into(),
+            g: reader.read_f32::<LE>()?.into(),
+            b: reader.read_f32::<LE>()?.into(),
+            a: reader.read_f32::<LE>()?.into(),
         })
     }
     fn write<W: Write, V>(&self, writer: &mut Context<W, V>) -> TResult<()> {
-        writer.write_f32::<LE>(self.r)?;
-        writer.write_f32::<LE>(self.g)?;
-        writer.write_f32::<LE>(self.b)?;
-        writer.write_f32::<LE>(self.a)?;
+        writer.write_f32::<LE>(self.r.into())?;
+        writer.write_f32::<LE>(self.g.into())?;
+        writer.write_f32::<LE>(self.b.into())?;
+        writer.write_f32::<LE>(self.a.into())?;
         Ok(())
     }
 }
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Quat {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
-    pub w: f64,
+    pub x: Double,
+    pub y: Double,
+    pub z: Double,
+    pub w: Double,
 }
 impl Quat {
     fn read<R: Read + Seek, V: VersionInfo>(reader: &mut Context<R, V>) -> TResult<Self> {
         if reader.version().large_world_coordinates() {
             Ok(Self {
-                x: reader.read_f64::<LE>()?,
-                y: reader.read_f64::<LE>()?,
-                z: reader.read_f64::<LE>()?,
-                w: reader.read_f64::<LE>()?,
+                x: reader.read_f64::<LE>()?.into(),
+                y: reader.read_f64::<LE>()?.into(),
+                z: reader.read_f64::<LE>()?.into(),
+                w: reader.read_f64::<LE>()?.into(),
             })
         } else {
             Ok(Self {
-                x: reader.read_f32::<LE>()? as f64,
-                y: reader.read_f32::<LE>()? as f64,
-                z: reader.read_f32::<LE>()? as f64,
-                w: reader.read_f32::<LE>()? as f64,
+                x: reader.read_f32::<LE>()?.into(),
+                y: reader.read_f32::<LE>()?.into(),
+                z: reader.read_f32::<LE>()?.into(),
+                w: reader.read_f32::<LE>()?.into(),
             })
         }
     }
     fn write<W: Write, V: VersionInfo>(&self, writer: &mut Context<W, V>) -> TResult<()> {
         if writer.version().large_world_coordinates() {
-            writer.write_f64::<LE>(self.x)?;
-            writer.write_f64::<LE>(self.y)?;
-            writer.write_f64::<LE>(self.z)?;
-            writer.write_f64::<LE>(self.w)?;
+            writer.write_f64::<LE>(self.x.into())?;
+            writer.write_f64::<LE>(self.y.into())?;
+            writer.write_f64::<LE>(self.z.into())?;
+            writer.write_f64::<LE>(self.w.into())?;
         } else {
-            writer.write_f32::<LE>(self.x as f32)?;
-            writer.write_f32::<LE>(self.y as f32)?;
-            writer.write_f32::<LE>(self.z as f32)?;
-            writer.write_f32::<LE>(self.w as f32)?;
+            writer.write_f32::<LE>(self.x.into())?;
+            writer.write_f32::<LE>(self.y.into())?;
+            writer.write_f32::<LE>(self.z.into())?;
+            writer.write_f32::<LE>(self.w.into())?;
         }
         Ok(())
     }
 }
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Rotator {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
+    pub x: Double,
+    pub y: Double,
+    pub z: Double,
 }
 impl Rotator {
     fn read<R: Read + Seek, V: VersionInfo>(reader: &mut Context<R, V>) -> TResult<Self> {
         if reader.version().large_world_coordinates() {
             Ok(Self {
-                x: reader.read_f64::<LE>()?,
-                y: reader.read_f64::<LE>()?,
-                z: reader.read_f64::<LE>()?,
+                x: reader.read_f64::<LE>()?.into(),
+                y: reader.read_f64::<LE>()?.into(),
+                z: reader.read_f64::<LE>()?.into(),
             })
         } else {
             Ok(Self {
-                x: reader.read_f32::<LE>()? as f64,
-                y: reader.read_f32::<LE>()? as f64,
-                z: reader.read_f32::<LE>()? as f64,
+                x: reader.read_f32::<LE>()?.into(),
+                y: reader.read_f32::<LE>()?.into(),
+                z: reader.read_f32::<LE>()?.into(),
             })
         }
     }
     fn write<W: Write, V: VersionInfo>(&self, writer: &mut Context<W, V>) -> TResult<()> {
         if writer.version().large_world_coordinates() {
-            writer.write_f64::<LE>(self.x)?;
-            writer.write_f64::<LE>(self.y)?;
-            writer.write_f64::<LE>(self.z)?;
+            writer.write_f64::<LE>(self.x.into())?;
+            writer.write_f64::<LE>(self.y.into())?;
+            writer.write_f64::<LE>(self.z.into())?;
         } else {
-            writer.write_f32::<LE>(self.x as f32)?;
-            writer.write_f32::<LE>(self.y as f32)?;
-            writer.write_f32::<LE>(self.z as f32)?;
+            writer.write_f32::<LE>(self.x.into())?;
+            writer.write_f32::<LE>(self.y.into())?;
+            writer.write_f32::<LE>(self.z.into())?;
         }
         Ok(())
     }
@@ -1539,65 +1765,65 @@ impl Color {
 }
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Vector {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
+    pub x: Double,
+    pub y: Double,
+    pub z: Double,
 }
 impl Vector {
     fn read<R: Read + Seek, V: VersionInfo>(reader: &mut Context<R, V>) -> TResult<Self> {
         if reader.version().large_world_coordinates() {
             Ok(Self {
-                x: reader.read_f64::<LE>()?,
-                y: reader.read_f64::<LE>()?,
-                z: reader.read_f64::<LE>()?,
+                x: reader.read_f64::<LE>()?.into(),
+                y: reader.read_f64::<LE>()?.into(),
+                z: reader.read_f64::<LE>()?.into(),
             })
         } else {
             Ok(Self {
-                x: reader.read_f32::<LE>()? as f64,
-                y: reader.read_f32::<LE>()? as f64,
-                z: reader.read_f32::<LE>()? as f64,
+                x: reader.read_f32::<LE>()?.into(),
+                y: reader.read_f32::<LE>()?.into(),
+                z: reader.read_f32::<LE>()?.into(),
             })
         }
     }
     fn write<W: Write, V: VersionInfo>(&self, writer: &mut Context<W, V>) -> TResult<()> {
         if writer.version().large_world_coordinates() {
-            writer.write_f64::<LE>(self.x)?;
-            writer.write_f64::<LE>(self.y)?;
-            writer.write_f64::<LE>(self.z)?;
+            writer.write_f64::<LE>(self.x.into())?;
+            writer.write_f64::<LE>(self.y.into())?;
+            writer.write_f64::<LE>(self.z.into())?;
         } else {
-            writer.write_f32::<LE>(self.x as f32)?;
-            writer.write_f32::<LE>(self.y as f32)?;
-            writer.write_f32::<LE>(self.z as f32)?;
+            writer.write_f32::<LE>(self.x.into())?;
+            writer.write_f32::<LE>(self.y.into())?;
+            writer.write_f32::<LE>(self.z.into())?;
         }
         Ok(())
     }
 }
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Vector2D {
-    pub x: f64,
-    pub y: f64,
+    pub x: Double,
+    pub y: Double,
 }
 impl Vector2D {
     fn read<R: Read + Seek, V: VersionInfo>(reader: &mut Context<R, V>) -> TResult<Self> {
         if reader.version().large_world_coordinates() {
             Ok(Self {
-                x: reader.read_f64::<LE>()?,
-                y: reader.read_f64::<LE>()?,
+                x: reader.read_f64::<LE>()?.into(),
+                y: reader.read_f64::<LE>()?.into(),
             })
         } else {
             Ok(Self {
-                x: reader.read_f32::<LE>()? as f64,
-                y: reader.read_f32::<LE>()? as f64,
+                x: reader.read_f32::<LE>()?.into(),
+                y: reader.read_f32::<LE>()?.into(),
             })
         }
     }
     fn write<W: Write, V: VersionInfo>(&self, writer: &mut Context<W, V>) -> TResult<()> {
         if writer.version().large_world_coordinates() {
-            writer.write_f64::<LE>(self.x)?;
-            writer.write_f64::<LE>(self.y)?;
+            writer.write_f64::<LE>(self.x.into())?;
+            writer.write_f64::<LE>(self.y.into())?;
         } else {
-            writer.write_f32::<LE>(self.x as f32)?;
-            writer.write_f32::<LE>(self.y as f32)?;
+            writer.write_f32::<LE>(self.x.into())?;
+            writer.write_f32::<LE>(self.y.into())?;
         }
         Ok(())
     }
@@ -1811,8 +2037,8 @@ impl<W: Write, V> Writable<W, V> for FFormatArgumentData {
 pub enum FFormatArgumentDataValue {
     Int(i32),
     UInt(u32),
-    Float(f32),
-    Double(f64),
+    Float(Float),
+    Double(Double),
     Text(std::boxed::Box<Text>),
     Gender(u64),
 }
@@ -1822,8 +2048,8 @@ impl<R: Read + Seek, V> Readable<R, V> for FFormatArgumentDataValue {
         match type_ {
             0 => Ok(Self::Int(reader.read_i32::<LE>()?)),
             1 => Ok(Self::UInt(reader.read_u32::<LE>()?)),
-            2 => Ok(Self::Float(reader.read_f32::<LE>()?)),
-            3 => Ok(Self::Double(reader.read_f64::<LE>()?)),
+            2 => Ok(Self::Float(reader.read_f32::<LE>()?.into())),
+            3 => Ok(Self::Double(reader.read_f64::<LE>()?.into())),
             4 => Ok(Self::Text(std::boxed::Box::new(Text::read(reader)?))),
             5 => Ok(Self::Gender(reader.read_u64::<LE>()?)),
             _ => Err(Error::Other(format!(
@@ -1845,11 +2071,11 @@ impl<W: Write, V> Writable<W, V> for FFormatArgumentDataValue {
             }
             Self::Float(value) => {
                 writer.write_u8(2)?;
-                writer.write_f32::<LE>(*value)?;
+                writer.write_f32::<LE>((*value).into())?;
             }
             Self::Double(value) => {
                 writer.write_u8(3)?;
-                writer.write_f64::<LE>(*value)?;
+                writer.write_f64::<LE>((*value).into())?;
             }
             Self::Text(value) => {
                 writer.write_u8(4)?;
@@ -1868,8 +2094,8 @@ impl<W: Write, V> Writable<W, V> for FFormatArgumentDataValue {
 pub enum FFormatArgumentValue {
     Int(i64),
     UInt(u64),
-    Float(f32),
-    Double(f64),
+    Float(Float),
+    Double(Double),
     Text(std::boxed::Box<Text>),
     Gender(u64),
 }
@@ -1880,8 +2106,8 @@ impl<R: Read + Seek, V> Readable<R, V> for FFormatArgumentValue {
         match type_ {
             0 => Ok(Self::Int(reader.read_i64::<LE>()?)),
             1 => Ok(Self::UInt(reader.read_u64::<LE>()?)),
-            2 => Ok(Self::Float(reader.read_f32::<LE>()?)),
-            3 => Ok(Self::Double(reader.read_f64::<LE>()?)),
+            2 => Ok(Self::Float(reader.read_f32::<LE>()?.into())),
+            3 => Ok(Self::Double(reader.read_f64::<LE>()?.into())),
             4 => Ok(Self::Text(std::boxed::Box::new(Text::read(reader)?))),
             5 => Ok(Self::Gender(reader.read_u64::<LE>()?)),
             _ => Err(Error::Other(format!(
@@ -1903,11 +2129,11 @@ impl<W: Write, V> Writable<W, V> for FFormatArgumentValue {
             }
             Self::Float(value) => {
                 writer.write_u8(2)?;
-                writer.write_f32::<LE>(*value)?;
+                writer.write_f32::<LE>((*value).into())?;
             }
             Self::Double(value) => {
                 writer.write_u8(3)?;
-                writer.write_f64::<LE>(*value)?;
+                writer.write_f64::<LE>((*value).into())?;
             }
             Self::Text(value) => {
                 writer.write_u8(4)?;
@@ -2236,8 +2462,12 @@ impl PropertyValue {
                 PropertyType::Int64Property => PropertyValue::Int64(reader.read_i64::<LE>()?),
                 PropertyType::UInt16Property => PropertyValue::UInt16(reader.read_u16::<LE>()?),
                 PropertyType::UInt32Property => PropertyValue::UInt32(reader.read_u32::<LE>()?),
-                PropertyType::FloatProperty => PropertyValue::Float(reader.read_f32::<LE>()?),
-                PropertyType::DoubleProperty => PropertyValue::Double(reader.read_f64::<LE>()?),
+                PropertyType::FloatProperty => {
+                    PropertyValue::Float(reader.read_f32::<LE>()?.into())
+                }
+                PropertyType::DoubleProperty => {
+                    PropertyValue::Double(reader.read_f64::<LE>()?.into())
+                }
                 PropertyType::NameProperty => PropertyValue::Name(read_string(reader)?),
                 PropertyType::StrProperty => PropertyValue::Str(read_string(reader)?),
                 PropertyType::SoftObjectProperty => {
@@ -2256,8 +2486,8 @@ impl PropertyValue {
             PropertyValue::Int64(v) => writer.write_i64::<LE>(*v)?,
             PropertyValue::UInt16(v) => writer.write_u16::<LE>(*v)?,
             PropertyValue::UInt32(v) => writer.write_u32::<LE>(*v)?,
-            PropertyValue::Float(v) => writer.write_f32::<LE>(*v)?,
-            PropertyValue::Double(v) => writer.write_f64::<LE>(*v)?,
+            PropertyValue::Float(v) => writer.write_f32::<LE>((*v).into())?,
+            PropertyValue::Double(v) => writer.write_f64::<LE>((*v).into())?,
             PropertyValue::Bool(v) => writer.write_u8(u8::from(*v))?,
             PropertyValue::Name(v) => write_string(writer, v)?,
             PropertyValue::Str(v) => write_string(writer, v)?,
@@ -2350,12 +2580,12 @@ impl ValueVec {
             PropertyType::UInt32Property => {
                 ValueVec::UInt32(read_array(count, reader, |r| Ok(r.read_u32::<LE>()?))?)
             }
-            PropertyType::FloatProperty => {
-                ValueVec::Float(read_array(count, reader, |r| Ok(r.read_f32::<LE>()?))?)
-            }
-            PropertyType::DoubleProperty => {
-                ValueVec::Double(read_array(count, reader, |r| Ok(r.read_f64::<LE>()?))?)
-            }
+            PropertyType::FloatProperty => ValueVec::Float(read_array(count, reader, |r| {
+                Ok(r.read_f32::<LE>()?.into())
+            })?),
+            PropertyType::DoubleProperty => ValueVec::Double(read_array(count, reader, |r| {
+                Ok(r.read_f64::<LE>()?.into())
+            })?),
             PropertyType::BoolProperty => {
                 ValueVec::Bool(read_array(count, reader, |r| Ok(r.read_u8()? > 0))?)
             }
@@ -2440,13 +2670,13 @@ impl ValueVec {
             ValueVec::Float(v) => {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
-                    writer.write_f32::<LE>(*i)?;
+                    writer.write_f32::<LE>((*i).into())?;
                 }
             }
             ValueVec::Double(v) => {
                 writer.write_u32::<LE>(v.len() as u32)?;
                 for i in v {
-                    writer.write_f64::<LE>(*i)?;
+                    writer.write_f64::<LE>((*i).into())?;
                 }
             }
             ValueVec::Bool(v) => {
@@ -2714,8 +2944,12 @@ impl Property {
                 PropertyType::UInt16Property => PropertyInner::UInt16(reader.read_u16::<LE>()?),
                 PropertyType::UInt32Property => PropertyInner::UInt32(reader.read_u32::<LE>()?),
                 PropertyType::UInt64Property => PropertyInner::UInt64(reader.read_u64::<LE>()?),
-                PropertyType::FloatProperty => PropertyInner::Float(reader.read_f32::<LE>()?),
-                PropertyType::DoubleProperty => PropertyInner::Double(reader.read_f64::<LE>()?),
+                PropertyType::FloatProperty => {
+                    PropertyInner::Float(reader.read_f32::<LE>()?.into())
+                }
+                PropertyType::DoubleProperty => {
+                    PropertyInner::Double(reader.read_f64::<LE>()?.into())
+                }
                 PropertyType::NameProperty => PropertyInner::Name(read_string(reader)?),
                 PropertyType::StrProperty => PropertyInner::Str(read_string(reader)?),
                 PropertyType::FieldPathProperty => {
@@ -2782,11 +3016,11 @@ impl Property {
                 8
             }
             PropertyInner::Float(value) => {
-                writer.write_f32::<LE>(*value)?;
+                writer.write_f32::<LE>((*value).into())?;
                 4
             }
             PropertyInner::Double(value) => {
-                writer.write_f64::<LE>(*value)?;
+                writer.write_f64::<LE>((*value).into())?;
                 8
             }
             PropertyInner::Bool(_) => 0,
