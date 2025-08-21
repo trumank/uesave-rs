@@ -1898,7 +1898,7 @@ pub enum SoftObjectPath {
     New {
         asset_path_name: String,
         package_name: String,
-        asset_name: String,
+        asset_name: (String, Vec<u8>),
     },
 }
 impl SoftObjectPath {
@@ -1907,7 +1907,7 @@ impl SoftObjectPath {
             Self::New {
                 asset_path_name: read_string(reader)?,
                 package_name: read_string(reader)?,
-                asset_name: read_string(reader)?,
+                asset_name: read_string_trailing(reader)?,
             }
         } else {
             Self::Old {
@@ -1928,11 +1928,11 @@ impl SoftObjectPath {
             Self::New {
                 asset_path_name,
                 package_name,
-                asset_name,
+                asset_name: (asset_name, trailing),
             } => {
                 write_string(writer, asset_path_name)?;
                 write_string(writer, package_name)?;
-                write_string(writer, asset_name)?;
+                write_string_trailing(writer, asset_name, Some(trailing))?;
             }
         }
         Ok(())
