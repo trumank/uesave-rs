@@ -106,7 +106,7 @@ fn test_header() -> TResult<()> {
         0x00, 0x00,
     ];
     let mut reader = Cursor::new(&original);
-    let header = run(&mut reader, |reader| Header::read(reader))?;
+    let header = run(&mut reader, Header::read)?;
     let mut reconstructed = vec![];
     run(&mut reconstructed, |writer| header.write(writer))?;
     assert_eq!(original, &reconstructed[..]);
@@ -119,7 +119,7 @@ fn test_uuid() -> TResult<()> {
     let mut writer = vec![];
     run(&mut writer, |writer| id.write(writer))?;
     let mut reader = Cursor::new(&writer);
-    let rid = run(&mut reader, |reader| uuid::Uuid::read(reader))?;
+    let rid = run(&mut reader, uuid::Uuid::read)?;
     assert_eq!(id, rid);
     Ok(())
 }
