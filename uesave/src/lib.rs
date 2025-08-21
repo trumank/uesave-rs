@@ -676,7 +676,7 @@ impl PropertyTagPartial {
     }
 }
 impl PropertyTagFull<'_> {
-    fn into_full(self) -> PropertyTagPartial {
+    fn into_partial(self) -> PropertyTagPartial {
         PropertyTagPartial {
             id: self.id,
             data: self.data.into_partial(),
@@ -2973,7 +2973,7 @@ impl Property {
             },
         };
         Ok(Property {
-            tag: tag.into_full(),
+            tag: tag.into_partial(),
             inner,
         })
     }
