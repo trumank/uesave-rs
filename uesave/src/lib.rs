@@ -631,6 +631,21 @@ impl PropertyTagDataFull {
             Self::Other(property_type) => *property_type,
         }
     }
+    fn has_raw_struct(&self) -> bool {
+        match self {
+            Self::Array(inner) => inner.has_raw_struct(),
+            Self::Struct { struct_type, .. } => struct_type.raw(),
+            Self::Set { key_type } => key_type.has_raw_struct(),
+            Self::Map {
+                key_type,
+                value_type,
+            } => key_type.has_raw_struct() || value_type.has_raw_struct(),
+            Self::Byte(_) => false,
+            Self::Enum(_, _) => false,
+            Self::Bool(_) => false,
+            Self::Other(_) => false,
+        }
+    }
     fn from_type(inner_type: PropertyType, struct_type: Option<StructType>) -> Self {
         match inner_type {
             PropertyType::BoolProperty => Self::Bool(false),
@@ -688,89 +703,86 @@ impl PropertyTagFull<'_> {
             return Ok(None);
         }
         if reader.version().property_tag() {
-            let data = read_type(reader)?;
-
-            let mut tag = Self {
-                name: name.into(),
-                size: 0,
-                index: 0,
-                id: None,
-                data,
-            };
+            let root_node = read_node(reader)?;
 
             #[derive(Default, Debug)]
             struct Node {
                 name: String,
-                inner_count: u32,
+                inner: Vec<Node>,
             }
             fn read_node<R: Read + Seek, V>(reader: &mut Context<R, V>) -> TResult<Node> {
                 Ok(Node {
                     name: read_string(reader)?,
-                    inner_count: reader.read_u32::<LE>()?,
+                    inner: read_array(reader.read_u32::<LE>()?, reader, read_node)?,
                 })
             }
-            fn read_path<R: Read + Seek, V>(reader: &mut Context<R, V>) -> TResult<String> {
-                let name = read_node(reader)?;
-                assert_eq!(1, name.inner_count);
-                let package = read_node(reader)?;
-                assert_eq!(0, package.inner_count);
+            fn read_path(node: &Node) -> TResult<String> {
+                let name = node;
+                assert_eq!(1, name.inner.len());
+                let package = &name.inner[0];
+                assert_eq!(0, package.inner.len());
                 Ok(format!("{}.{}", package.name, name.name))
             }
-            fn read_type<R: Read + Seek, V>(
-                reader: &mut Context<R, V>,
-            ) -> TResult<PropertyTagDataFull> {
-                let node = read_node(reader)?;
+            fn read_type(node: &Node, flags: EPropertyTagFlags) -> TResult<PropertyTagDataFull> {
                 Ok(match node.name.as_str() {
-                    "ArrayProperty" => PropertyTagDataFull::Array(read_type(reader)?.into()),
+                    "ArrayProperty" => {
+                        PropertyTagDataFull::Array(read_type(&node.inner[0], flags)?.into())
+                    }
                     "StructProperty" => {
-                        let struct_type = StructType::from_full(&read_path(reader)?);
-                        let id = match node.inner_count {
+                        let raw = flags.contains(EPropertyTagFlags::HasBinaryOrNativeSerialize);
+                        let struct_type = StructType::from_full(&read_path(&node.inner[0])?, raw);
+                        let id = match node.inner.len() {
                             1 => Default::default(),
-                            2 => uuid::Uuid::parse_str(&read_node(reader)?.name)?,
+                            2 => uuid::Uuid::parse_str(&node.inner[1].name)?,
                             _ => unimplemented!(),
                         };
                         PropertyTagDataFull::Struct { struct_type, id }
                     }
                     "SetProperty" => PropertyTagDataFull::Set {
-                        key_type: read_type(reader)?.into(),
+                        key_type: read_type(&node.inner[0], flags)?.into(),
                     },
                     "MapProperty" => PropertyTagDataFull::Map {
-                        key_type: read_type(reader)?.into(),
-                        value_type: read_type(reader)?.into(),
+                        key_type: read_type(&node.inner[0], flags)?.into(),
+                        value_type: read_type(&node.inner[1], flags)?.into(),
                     },
                     "ByteProperty" => {
-                        let inner = match node.inner_count {
+                        let inner = match node.inner.len() {
                             0 => None,
-                            1 => Some(read_path(reader)?),
+                            1 => Some(read_path(&node.inner[0])?),
                             _ => unimplemented!(),
                         };
                         PropertyTagDataFull::Byte(inner)
                     }
                     "EnumProperty" => {
-                        assert_eq!(2, node.inner_count);
-                        let inner = read_path(reader)?;
-                        let container = read_node(reader)?;
-                        assert_eq!(0, container.inner_count);
+                        assert_eq!(2, node.inner.len());
+                        let inner = read_path(&node.inner[0])?;
+                        let container = &node.inner[1];
+                        assert_eq!(0, container.inner.len());
                         PropertyTagDataFull::Enum(inner, Some(container.name.to_owned()))
                     }
-                    "BoolProperty" => PropertyTagDataFull::Bool(false),
+                    "BoolProperty" => {
+                        PropertyTagDataFull::Bool(flags.contains(EPropertyTagFlags::BoolTrue))
+                    }
                     other => {
-                        assert_eq!(0, node.inner_count);
+                        assert_eq!(0, node.inner.len());
                         PropertyTagDataFull::Other(PropertyType::try_from(other)?)
                     }
                 })
             }
 
-            tag.size = reader.read_u32::<LE>()?;
+            let size = reader.read_u32::<LE>()?;
 
             let flags = EPropertyTagFlags::from_bits(reader.read_u8()?)
                 .ok_or_else(|| error::Error::Other("unknown EPropertyTagFlags bits".into()))?;
 
-            if flags.contains(EPropertyTagFlags::BoolTrue) {
-                if let PropertyTagDataFull::Bool(value) = &mut tag.data {
-                    *value = true
-                }
-            }
+            let mut tag = Self {
+                name: name.into(),
+                size,
+                index: 0,
+                id: None,
+                data: read_type(&root_node, flags)?,
+            };
+
             if flags.contains(EPropertyTagFlags::HasArrayIndex) {
                 tag.index = reader.read_u32::<LE>()?;
             }
@@ -1158,6 +1170,7 @@ pub enum StructType {
     SoftObjectPath,
     GameplayTagContainer,
     UniqueNetIdRepl,
+    Raw(String),
     Struct(Option<String>),
 }
 impl From<&str> for StructType {
@@ -1207,7 +1220,7 @@ impl From<String> for StructType {
     }
 }
 impl StructType {
-    fn from_full(t: &str) -> Self {
+    fn from_full(t: &str, raw: bool) -> Self {
         match t {
             "/Script/CoreUObject.Guid" => StructType::Guid,
             "/Script/CoreUObject.DateTime" => StructType::DateTime,
@@ -1225,6 +1238,7 @@ impl StructType {
             "/Script/GameplayTags.GameplayTagContainer" => StructType::GameplayTagContainer,
             "/Script/Engine.UniqueNetIdRepl" => StructType::UniqueNetIdRepl,
             "/Script/CoreUObject.Struct" => StructType::Struct(None),
+            _ if raw => StructType::Raw(t.to_owned()),
             _ => StructType::Struct(Some(t.to_owned())),
         }
     }
@@ -1245,6 +1259,7 @@ impl StructType {
             StructType::SoftObjectPath => "/Script/CoreUObject.SoftObjectPath",
             StructType::GameplayTagContainer => "/Script/GameplayTags.GameplayTagContainer",
             StructType::UniqueNetIdRepl => "/Script/Engine.UniqueNetIdRepl",
+            StructType::Raw(t) => t,
             StructType::Struct(Some(t)) => t,
             _ => unreachable!(),
         }
@@ -1266,6 +1281,7 @@ impl StructType {
             StructType::SoftObjectPath => "SoftObjectPath",
             StructType::GameplayTagContainer => "GameplayTagContainer",
             StructType::UniqueNetIdRepl => "UniqueNetIdRepl",
+            StructType::Raw(t) => t,
             StructType::Struct(Some(t)) => t,
             _ => unreachable!(),
         }
@@ -1276,6 +1292,9 @@ impl StructType {
     fn write<W: Write, V>(&self, writer: &mut Context<W, V>) -> TResult<()> {
         write_string(writer, self.as_str())?;
         Ok(())
+    }
+    fn raw(&self) -> bool {
+        matches!(self, StructType::Raw(_))
     }
 }
 
@@ -2394,6 +2413,8 @@ pub enum StructValue {
     SoftObjectPath(SoftObjectPath),
     GameplayTagContainer(GameplayTagContainer),
     UniqueNetIdRepl(UniqueNetIdRepl),
+    /// Raw struct data for other unknown structs serialized with HasBinaryOrNativeSerialize
+    Raw(Vec<u8>),
     /// User defined struct which is simply a list of properties
     Struct(Properties),
 }
@@ -2531,7 +2552,7 @@ impl StructValue {
             StructType::UniqueNetIdRepl => {
                 StructValue::UniqueNetIdRepl(UniqueNetIdRepl::read(reader)?)
             }
-
+            StructType::Raw(_) => unreachable!("should be handled at property level"),
             StructType::Struct(_) => StructValue::Struct(read_properties_until_none(reader)?),
         })
     }
@@ -2552,6 +2573,7 @@ impl StructValue {
             StructValue::SoftObjectPath(v) => v.write(writer)?,
             StructValue::GameplayTagContainer(v) => v.write(writer)?,
             StructValue::UniqueNetIdRepl(v) => v.write(writer)?,
+            StructValue::Raw(v) => writer.write_all(v)?,
             StructValue::Struct(v) => write_properties_none_terminated(writer, v)?,
         }
         Ok(())
@@ -2886,6 +2908,7 @@ pub enum PropertyInner {
     Map(Vec<MapEntry>),
     Struct(StructValue),
     Array(ValueArray),
+    Raw(Vec<u8>),
 }
 
 impl Property {
@@ -2893,6 +2916,14 @@ impl Property {
         reader: &mut Context<R, V>,
         tag: PropertyTagFull,
     ) -> TResult<Property> {
+        if tag.data.has_raw_struct() {
+            let mut raw = vec![0; tag.size as usize];
+            reader.read_exact(&mut raw)?;
+            return Ok(Property {
+                tag: tag.into_partial(),
+                inner: PropertyInner::Raw(raw),
+            });
+        }
         let inner = match &tag.data {
             PropertyTagDataFull::Bool(value) => PropertyInner::Bool(*value),
             PropertyTagDataFull::Byte(ref enum_type) => {
@@ -3126,6 +3157,10 @@ impl Property {
                 writer.with_stream(&mut buf, |writer| value.write(writer, tag))?;
                 writer.write_all(&buf)?;
                 buf.len()
+            }
+            PropertyInner::Raw(value) => {
+                writer.write_all(value)?;
+                value.len()
             }
         })
     }
